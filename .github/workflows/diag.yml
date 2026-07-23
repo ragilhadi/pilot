@@ -11,19 +11,36 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Compare git toplevel vs Node realpath
-        shell: pwsh
-        run: |
-          Write-Host "cwd (PowerShell): $(Get-Location)"
-          $gitTop = git rev-parse --show-toplevel
-          Write-Host "git rev-parse --show-toplevel: [$gitTop]"
-          node -e "console.log('process.cwd():', JSON.stringify(process.cwd())); console.log('realpathSync(cwd):', JSON.stringify(require('fs').realpathSync(process.cwd()))); const path=require('node:path'); console.log('path.resolve(gitTop):', JSON.stringify(path.resolve(process.argv[1])));" "$gitTop"
       - name: Install ripgrep
         run: choco install ripgrep -y --no-progress
-      - name: Show ripgrep JSON path form
+      - name: Reproduce inside a temp workspace (like the failing tests do)
         shell: pwsh
         run: |
-          $root = git rev-parse --show-toplevel
-          $real = node -e "console.log(require('fs').realpathSync(process.argv[1]))" "$root"
-          Write-Host "real root: [$real]"
-          rg --json "pilot" --max-count 1 -- "$real" | Select-Object -First 3
+          node -e "
+            const { mkdtempSync, realpathSync, mkdirSync } = require('node:fs');
+            const { execFileSync } = require('node:child_process');
+            const os = require('node:os');
+            const path = require('node:path');
+
+            console.log('os.tmpdir():', JSON.stringify(os.tmpdir()));
+            const dir = mkdtempSync(path.join(os.tmpdir(), 'pilot-diag-'));
+            console.log('mkdtemp result:', JSON.stringify(dir));
+            const real = realpathSync(dir);
+            console.log('realpathSync(dir):', JSON.stringify(real));
+
+            execFileSync('git', ['init', '-q'], { cwd: dir });
+            execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: dir });
+            execFileSync('git', ['config', 'user.name', 'a'], { cwd: dir });
+            require('node:fs').writeFileSync(path.join(dir, 'f.txt'), 'pilot\n');
+            execFileSync('git', ['add', '.'], { cwd: dir });
+            execFileSync('git', ['commit', '-q', '-m', 'x'], { cwd: dir });
+
+            const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir }).toString().trim();
+            console.log('git --show-toplevel (cwd=mkdtemp result):', JSON.stringify(top));
+            console.log('path.resolve(top):', JSON.stringify(path.resolve(top)));
+            console.log('path.resolve(top) === real ?', path.resolve(top) === real);
+            console.log('path.resolve(top).toLowerCase() === real.toLowerCase() ?', path.resolve(top).toLowerCase() === real.toLowerCase());
+
+            const rg = execFileSync('rg', ['--json', 'pilot', '--', real]).toString();
+            console.log('rg output:', rg.split(String.fromCharCode(10))[0]);
+          "
