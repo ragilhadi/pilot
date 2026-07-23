@@ -103,12 +103,15 @@ Packages are versioned in lockstep. To cut a release:
 ```sh
 node scripts/set-version.mjs 0.2.0
 git commit -am "release: v0.2.0"
-git tag v0.2.0
+git tag pilot-v0.2.0
 git push --follow-tags
 ```
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which re-runs the full check/test/
-build gate and then publishes all `@pilot/*` packages to npm.
+Then publish a GitHub Release from that tag (via the GitHub UI, or `gh release create pilot-v0.2.0
+--generate-notes`). Publishing the release triggers `.github/workflows/release.yml`, which verifies
+the tag matches the package version, re-runs the full check/test/build gate, and then publishes all
+`@pilot/*` packages to npm. The workflow can also be run manually via `workflow_dispatch` for a
+retry, in which case it publishes whatever version is currently in `apps/cli/package.json`.
 
 ## License
 
