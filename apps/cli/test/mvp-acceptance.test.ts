@@ -134,13 +134,12 @@ describe("MVP acceptance scenario", () => {
           stderr: errors,
           gitRunner,
           instructionDiscovery,
-          stdin: delayedLines([
-            { line: "Fix the failing validation test." },
-            { line: "allow once", delayMs: 400 },
-            { line: "allow once", delayMs: 600 },
-            { line: "allow once", delayMs: 600 },
-            { line: "/exit", delayMs: 2_000 },
-          ]),
+          stdin: approvalAwareLines({
+            initialLine: "Fix the failing validation test.",
+            approvalCount: 3,
+            output,
+            remainingScripts: () => model.remainingScripts,
+          }),
         });
 
         expect(
@@ -154,10 +153,6 @@ describe("MVP acceptance scenario", () => {
           "validation failed: expected two-character names to be invalid",
         );
         expect(errors.text()).not.toContain("Invalid approval response");
-        if (model.remainingScripts !== 0) {
-          console.error("DIAG stderr:", JSON.stringify(errors.text()));
-          console.error("DIAG stdout:", JSON.stringify(output.text()));
-        }
         expect(model.remainingScripts).toBe(0);
         expect(await readFile(path.join(workspacePath, "src", "validation.ts"), "utf8")).toBe(
           fixedImplementation,
@@ -470,6 +465,58 @@ function delayedLines(entries: readonly { readonly line?: string; readonly delay
         await new Promise((resolve) => setTimeout(resolve, entry?.delayMs));
       }
       return entry?.line;
+    },
+  } satisfies LineReader;
+}
+
+/**
+ * Drives a chat turn that needs a fixed number of permission approvals, without
+ * racing fixed millisecond delays against however long the model/tool cycle
+ * actually takes under CI load. Waits for the next "[approval required" marker
+ * to actually appear in rendered output before answering it, and waits for the
+ * fake model's script queue to drain before sending /exit, so a slow run never
+ * gets cancelled mid-flight by an /exit arriving too early.
+ */
+function approvalAwareLines(options: {
+  readonly initialLine: string;
+  readonly approvalCount: number;
+  readonly output: { readonly text: () => string };
+  readonly remainingScripts: () => number;
+  readonly pollIntervalMs?: number;
+  readonly exitTimeoutMs?: number;
+}): LineReader {
+  const pollIntervalMs = options.pollIntervalMs ?? 10;
+  const exitTimeoutMs = options.exitTimeoutMs ?? 10_000;
+  let stage: "initial" | "approvals" | "exit" | "done" = "initial";
+  let approvalsSent = 0;
+
+  const countApprovalPrompts = () => options.output.text().split("[approval required").length - 1;
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  return {
+    async readLine() {
+      if (stage === "initial") {
+        stage = options.approvalCount > 0 ? "approvals" : "exit";
+        return options.initialLine;
+      }
+      if (stage === "approvals") {
+        const target = approvalsSent + 1;
+        while (countApprovalPrompts() < target) {
+          await sleep(pollIntervalMs);
+        }
+        approvalsSent += 1;
+        if (approvalsSent >= options.approvalCount) stage = "exit";
+        return "allow once";
+      }
+      if (stage === "exit") {
+        stage = "done";
+        const deadline = Date.now() + exitTimeoutMs;
+        while (options.remainingScripts() > 0 && Date.now() < deadline) {
+          await sleep(pollIntervalMs);
+        }
+        return "/exit";
+      }
+      return undefined;
     },
   } satisfies LineReader;
 }
