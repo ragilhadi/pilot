@@ -4,7 +4,7 @@ import {
   correlationId,
   type EventDeliveryError,
   eventId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it, vi } from "vitest";
 import { InMemoryEventBus } from "../src/index.js";
 

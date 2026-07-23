@@ -1,4 +1,4 @@
-import { ModelContractValidationError, ModelError, toSafeErrorSnapshot } from "@pilot/core";
+import { ModelContractValidationError, ModelError, toSafeErrorSnapshot } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import { ModelStreamAccumulator, ModelStreamProtocolError } from "../src/index.js";
 

@@ -7,7 +7,7 @@ import {
   type PersistenceRepositories,
   type RunId,
   type SessionId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type { RunCheckpoint, RunCheckpointWriter } from "./application-runner.js";
 import type { MonotonicClock } from "./run-budget.js";
 

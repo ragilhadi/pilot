@@ -3,8 +3,8 @@ import {
   parseAgentMessage,
   parseModelRequest,
   type ModelCapabilities,
-} from "@pilot/core";
-import { FakeLanguageModel, textResponseScript } from "@pilot/testkit";
+} from "@pilotrun/core";
+import { FakeLanguageModel, textResponseScript } from "@pilotrun/testkit";
 import { describe, expect, it } from "vitest";
 import {
   inspectModelCapabilities,

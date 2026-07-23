@@ -11,15 +11,15 @@ import {
   ToolResultContextFormatter,
   type PromptCompositionSnapshot,
   type ToolExecutionLifecycleEvent,
-} from "@pilot/agent-runtime";
+} from "@pilotrun/agent-runtime";
 import {
   type AgentMessage,
   type JsonValue,
   parseAgentMessage,
   parseModelRequest,
   runId,
-} from "@pilot/core";
-import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilot/testkit";
+} from "@pilotrun/core";
+import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilotrun/testkit";
 import {
   createApplyPatchTool,
   createReadFileTool,
@@ -27,7 +27,7 @@ import {
   InMemoryChangeJournal,
   NodeWorkspaceBoundary,
   NodeWorkspaceFileSystem,
-} from "@pilot/tools-builtin";
+} from "@pilotrun/tools-builtin";
 import { describe, expect, it } from "vitest";
 import {
   type EvaluationCase,

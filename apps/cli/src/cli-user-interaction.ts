@@ -4,7 +4,7 @@ import {
   type PermissionApprovalResponse,
   type PermissionApprovalScopeKind,
   type UserInteraction,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type PermissionInputResult = "accepted" | "invalid" | "none";
 

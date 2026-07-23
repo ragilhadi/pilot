@@ -8,7 +8,7 @@ import {
   toSafeErrorSnapshot,
   type ModelCapabilities,
   type ModelStreamEvent,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it, vi } from "vitest";
 import { type Fetch, OpenAICompatibleLanguageModel } from "../src/index.js";
 

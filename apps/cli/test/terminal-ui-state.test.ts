@@ -1,4 +1,4 @@
-import { messageId, parseAgentMessage, runId, sessionId, toolCallId } from "@pilot/core";
+import { messageId, parseAgentMessage, runId, sessionId, toolCallId } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   ChatEventFactory,

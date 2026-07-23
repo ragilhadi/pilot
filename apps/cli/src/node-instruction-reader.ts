@@ -4,7 +4,7 @@ import type {
   InstructionFileReader,
   InstructionReadRequest,
   InstructionReadResult,
-} from "@pilot/agent-runtime";
+} from "@pilotrun/agent-runtime";
 
 export class NodeInstructionFileReader implements InstructionFileReader {
   readonly #workspaceRoot: string;

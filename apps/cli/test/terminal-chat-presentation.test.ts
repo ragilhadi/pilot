@@ -1,5 +1,5 @@
 import type { Terminal } from "@earendil-works/pi-tui";
-import { runId, sessionId } from "@pilot/core";
+import { runId, sessionId } from "@pilotrun/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChatEventFactory } from "../src/index.js";
 import { TerminalChatPresentation } from "../src/tui/terminal-chat-presentation.js";

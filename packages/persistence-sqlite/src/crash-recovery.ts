@@ -7,7 +7,7 @@ import {
   type RunId,
   type ToolCallId,
   type ToolRisk,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { SqliteRecordError } from "./repositories.js";
 import type { SqliteDatabase } from "./sqlite-database.js";
 

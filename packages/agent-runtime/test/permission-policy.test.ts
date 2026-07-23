@@ -4,7 +4,7 @@ import {
   type PermissionAction,
   type PermissionEvaluationContext,
   type PermissionRule,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   fingerprintPermissionAction,

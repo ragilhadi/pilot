@@ -1,5 +1,5 @@
 {
-  "name": "@pilot/tools-builtin",
+  "name": "@pilotrun/tools-builtin",
   "version": "0.0.1",
   "description": "Built-in filesystem, patch, shell, and Git tools for the Pilot coding agent.",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@pilot/core": "workspace:*",
+    "@pilotrun/core": "workspace:*",
     "zod": "catalog:"
   }
 }

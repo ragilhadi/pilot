@@ -1,4 +1,4 @@
-import { InstructionDiscovery, ModelRegistry, ToolRegistry } from "@pilot/agent-runtime";
+import { InstructionDiscovery, ModelRegistry, ToolRegistry } from "@pilotrun/agent-runtime";
 import {
   defineTool,
   messageId,
@@ -7,22 +7,22 @@ import {
   parseAgentMessage,
   runId,
   sessionId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import {
   createSqliteRepositories,
   SqliteDatabase,
   SqliteMigrationRunner,
   SqliteSessionAdministration,
-} from "@pilot/persistence-sqlite";
-import type { Fetch } from "@pilot/provider-openai-compatible";
-import type { GitCommandRunner } from "@pilot/tools-builtin";
+} from "@pilotrun/persistence-sqlite";
+import type { Fetch } from "@pilotrun/provider-openai-compatible";
+import type { GitCommandRunner } from "@pilotrun/tools-builtin";
 import {
   delayStep,
   eventStep,
   FakeLanguageModel,
   textResponseScript,
   toolCallScript,
-} from "@pilot/testkit";
+} from "@pilotrun/testkit";
 import { describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import {

@@ -13,7 +13,7 @@ import {
   parseModelRequest,
   parseModelStreamEvent,
   type TokenUsage,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type FakeModelStep =
   | { readonly kind: "delay"; readonly milliseconds: number }

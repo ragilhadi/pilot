@@ -6,7 +6,7 @@ import {
   sessionId,
   toolCallId,
   type AgentMessage,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   ContextEngine,

@@ -1,4 +1,4 @@
-import { defineTool, type ToolExecutionContext, ToolContractError } from "@pilot/core";
+import { defineTool, type ToolExecutionContext, ToolContractError } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import * as z from "zod";
 import { ToolNotFoundError, ToolRegistrationConflictError, ToolRegistry } from "../src/index.js";

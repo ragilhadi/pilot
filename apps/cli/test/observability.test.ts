@@ -1,11 +1,11 @@
-import { ModelRegistry } from "@pilot/agent-runtime";
+import { ModelRegistry } from "@pilotrun/agent-runtime";
 import {
   createSqliteRepositories,
   SqliteDatabase,
   SqliteMigrationRunner,
   SqliteSessionAdministration,
-} from "@pilot/persistence-sqlite";
-import { FakeLanguageModel, textResponseScript } from "@pilot/testkit";
+} from "@pilotrun/persistence-sqlite";
+import { FakeLanguageModel, textResponseScript } from "@pilotrun/testkit";
 import { describe, expect, it } from "vitest";
 import {
   inspectProviderCredentials,

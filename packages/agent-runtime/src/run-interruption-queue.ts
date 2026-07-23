@@ -1,4 +1,4 @@
-import { parseAgentMessage, type AgentMessage } from "@pilot/core";
+import { parseAgentMessage, type AgentMessage } from "@pilotrun/core";
 import type { RunAbortReason } from "./run-state-machine.js";
 
 export type RunInterruption =

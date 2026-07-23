@@ -12,7 +12,7 @@ import {
   type WorkspaceAccess,
   type WorkspaceBoundary,
   type WorkspacePath,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type WorkspacePathErrorReason =
   | "absolute-path"

@@ -1,4 +1,4 @@
-import type { AppEvent } from "@pilot/core";
+import type { AppEvent } from "@pilotrun/core";
 
 export const runtimeVersion = "0.0.0";
 

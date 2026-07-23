@@ -1,4 +1,4 @@
-import { PilotError, type TokenUsage, TokenUsageSchema } from "@pilot/core";
+import { PilotError, type TokenUsage, TokenUsageSchema } from "@pilotrun/core";
 import * as z from "zod";
 
 export const RunBudgetPolicySchema = z

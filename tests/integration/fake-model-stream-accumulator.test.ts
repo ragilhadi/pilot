@@ -1,6 +1,6 @@
-import { ModelStreamAccumulator, type ModelStreamProtocolError } from "@pilot/agent-runtime";
-import { parseModelRequest, runId } from "@pilot/core";
-import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilot/testkit";
+import { ModelStreamAccumulator, type ModelStreamProtocolError } from "@pilotrun/agent-runtime";
+import { parseModelRequest, runId } from "@pilotrun/core";
+import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilotrun/testkit";
 import { describe, expect, it } from "vitest";
 
 const request = parseModelRequest({

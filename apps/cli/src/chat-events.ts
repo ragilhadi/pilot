@@ -7,13 +7,13 @@ import type {
   RunId,
   SafeErrorSnapshot,
   SessionId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type {
   PromptCompositionSnapshot,
   RunState,
   ToolExecutionLifecycleEvent,
-} from "@pilot/agent-runtime";
-import type { CommandOutputEvent } from "@pilot/tools-builtin";
+} from "@pilotrun/agent-runtime";
+import type { CommandOutputEvent } from "@pilotrun/tools-builtin";
 import type { TextWriter } from "./cli.js";
 import { sanitizeTerminalText } from "./presentation/sanitize-terminal-text.js";
 

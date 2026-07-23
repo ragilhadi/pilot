@@ -1,4 +1,4 @@
-import { parseAgentMessage, parseModelRequest } from "@pilot/core";
+import { parseAgentMessage, parseModelRequest } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import { createChatCompletionsRequest } from "../src/index.js";
 

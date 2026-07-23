@@ -4,12 +4,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
-      "@pilot/agent-runtime": fileURLToPath(
+      "@pilotrun/agent-runtime": fileURLToPath(
         new URL("./packages/agent-runtime/src/index.ts", import.meta.url),
       ),
-      "@pilot/core": fileURLToPath(new URL("./packages/core/src/index.ts", import.meta.url)),
-      "@pilot/testkit": fileURLToPath(new URL("./packages/testkit/src/index.ts", import.meta.url)),
-      "@pilot/tools-builtin": fileURLToPath(
+      "@pilotrun/core": fileURLToPath(new URL("./packages/core/src/index.ts", import.meta.url)),
+      "@pilotrun/testkit": fileURLToPath(
+        new URL("./packages/testkit/src/index.ts", import.meta.url),
+      ),
+      "@pilotrun/tools-builtin": fileURLToPath(
         new URL("./packages/tools-builtin/src/index.ts", import.meta.url),
       ),
     },

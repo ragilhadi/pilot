@@ -33,7 +33,7 @@ import {
   type SessionSnapshot,
   type ToolActivityRepository,
   type UsageRepository,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
 export class SqliteRecordError extends PilotError {

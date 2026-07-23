@@ -3,7 +3,7 @@ import {
   type ToolRecovery,
   ToolRecoverySchema,
   type ToolRisk,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export function recoveryForToolError(code: PilotErrorCode): ToolRecovery {
   switch (code) {

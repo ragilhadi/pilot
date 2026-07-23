@@ -1,4 +1,4 @@
-import { PilotError } from "@pilot/core";
+import { PilotError } from "@pilotrun/core";
 
 export type InstructionTrust = "trusted-user" | "untrusted-project";
 

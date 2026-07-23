@@ -1,6 +1,6 @@
-import { ModelStreamAccumulator, RetryExecutor } from "@pilot/agent-runtime";
-import { ModelError, parseModelRequest, runId } from "@pilot/core";
-import { FakeLanguageModel, textResponseScript, throwStep } from "@pilot/testkit";
+import { ModelStreamAccumulator, RetryExecutor } from "@pilotrun/agent-runtime";
+import { ModelError, parseModelRequest, runId } from "@pilotrun/core";
+import { FakeLanguageModel, textResponseScript, throwStep } from "@pilotrun/testkit";
 import { describe, expect, it } from "vitest";
 
 const request = parseModelRequest({

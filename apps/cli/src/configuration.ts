@@ -6,7 +6,7 @@ import {
   type EffectiveConfiguration,
   parseJsonConfiguration,
   resolveConfiguration,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export const pilotConfigEnvironmentVariable = "PILOT_CONFIG";
 

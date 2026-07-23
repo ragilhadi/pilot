@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { CancellationError, PilotError, type WorkspaceBoundary } from "@pilot/core";
+import { CancellationError, PilotError, type WorkspaceBoundary } from "@pilotrun/core";
 import { WorkspacePathError } from "./workspace-boundary.js";
 
 export type IgnoreRuleSource = "builtin" | ".gitignore" | ".ignore" | ".pilotignore";

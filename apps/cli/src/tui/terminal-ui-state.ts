@@ -1,5 +1,5 @@
-import type { JsonValue, PermissionApprovalRequest, SafeErrorSnapshot } from "@pilot/core";
-import type { PromptCompositionSnapshot, RunState } from "@pilot/agent-runtime";
+import type { JsonValue, PermissionApprovalRequest, SafeErrorSnapshot } from "@pilotrun/core";
+import type { PromptCompositionSnapshot, RunState } from "@pilotrun/agent-runtime";
 import type { ChatEvent } from "../chat-events.js";
 
 export type TerminalUiPhase =

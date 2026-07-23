@@ -5,7 +5,7 @@ import {
   sessionId,
   toolCallId,
   type AgentMessage,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   ConversationCompactionError,

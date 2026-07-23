@@ -1,4 +1,4 @@
-import { runId, sessionId, toolCallId } from "@pilot/core";
+import { runId, sessionId, toolCallId } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   createSqliteRepositories,

@@ -2,14 +2,14 @@ import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ToolRegistry } from "@pilot/agent-runtime";
+import { ToolRegistry } from "@pilotrun/agent-runtime";
 import {
   CancellationError,
   runId,
   toolCallId,
   ToolContractError,
   type ToolExecutionContext,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createGrepTool,

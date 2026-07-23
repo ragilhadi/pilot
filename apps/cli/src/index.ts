@@ -8,14 +8,14 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { InstructionDiscovery, runtimeVersion } from "@pilot/agent-runtime";
+import { InstructionDiscovery, runtimeVersion } from "@pilotrun/agent-runtime";
 import {
   createSqliteRepositories,
   SqliteCrashRecovery,
   SqliteDatabase,
   SqliteMigrationRunner,
   SqliteSessionAdministration,
-} from "@pilot/persistence-sqlite";
+} from "@pilotrun/persistence-sqlite";
 import {
   type AppStartedEvent,
   type Clock,
@@ -24,7 +24,7 @@ import {
   eventSchemaVersion,
   type IdSource,
   toSafeErrorSnapshot,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { remediationForError, runCli } from "./cli.js";
 import { defaultConfigurationPaths, loadCliConfiguration } from "./configuration.js";
 import { NodeInstructionFileReader } from "./node-instruction-reader.js";

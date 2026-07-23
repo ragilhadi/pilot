@@ -1,4 +1,10 @@
-import type { AgentMessage, JsonObject, JsonValue, ModelRequest, ToolCallPart } from "@pilot/core";
+import type {
+  AgentMessage,
+  JsonObject,
+  JsonValue,
+  ModelRequest,
+  ToolCallPart,
+} from "@pilotrun/core";
 
 export interface OpenAIChatCompletionsRequest {
   readonly model: string;

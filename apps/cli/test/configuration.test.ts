@@ -1,6 +1,6 @@
-import { InstructionDiscovery, ModelRegistry } from "@pilot/agent-runtime";
-import { resolveConfiguration } from "@pilot/core";
-import { FakeLanguageModel, textResponseScript } from "@pilot/testkit";
+import { InstructionDiscovery, ModelRegistry } from "@pilotrun/agent-runtime";
+import { resolveConfiguration } from "@pilotrun/core";
+import { FakeLanguageModel, textResponseScript } from "@pilotrun/testkit";
 import { describe, expect, it } from "vitest";
 import {
   defaultConfigurationPaths,

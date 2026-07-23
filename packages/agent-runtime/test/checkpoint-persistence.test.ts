@@ -1,4 +1,4 @@
-import { runId, toolCallId, type PersistedCheckpoint } from "@pilot/core";
+import { runId, toolCallId, type PersistedCheckpoint } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   RepositoryRunCheckpointWriter,

@@ -1,5 +1,5 @@
 {
-  "name": "@pilot/cli",
+  "name": "@pilotrun/cli",
   "version": "0.0.1",
   "description": "Terminal-first, provider-neutral coding agent CLI.",
   "license": "MIT",
@@ -29,12 +29,12 @@
   },
   "dependencies": {
     "@earendil-works/pi-tui": "catalog:",
-    "@pilot/agent-runtime": "workspace:*",
-    "@pilot/core": "workspace:*",
-    "@pilot/persistence-sqlite": "workspace:*",
-    "@pilot/provider-openai-compatible": "workspace:*",
-    "@pilot/testkit": "workspace:*",
-    "@pilot/tools-builtin": "workspace:*",
+    "@pilotrun/agent-runtime": "workspace:*",
+    "@pilotrun/core": "workspace:*",
+    "@pilotrun/persistence-sqlite": "workspace:*",
+    "@pilotrun/provider-openai-compatible": "workspace:*",
+    "@pilotrun/testkit": "workspace:*",
+    "@pilotrun/tools-builtin": "workspace:*",
     "zod": "catalog:"
   }
 }

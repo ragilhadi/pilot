@@ -5,7 +5,7 @@ import {
   sessionId,
   type AgentMessage,
   type SessionRepository,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 
 export type SessionRepositoryFactory = () => SessionRepository | Promise<SessionRepository>;

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PilotError } from "@pilot/core";
+import { PilotError } from "@pilotrun/core";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
 export interface SqliteMigration {

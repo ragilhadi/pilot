@@ -16,7 +16,7 @@ import {
   ToolResultContextFormatter,
   ToolRegistry,
   type PromptCompositionSnapshot,
-} from "@pilot/agent-runtime";
+} from "@pilotrun/agent-runtime";
 import {
   type AgentMessage,
   type Clock,
@@ -31,12 +31,12 @@ import {
   SessionError,
   sessionId,
   toSafeErrorSnapshot,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import {
   diagnoseSqliteDatabase,
   type SqliteDatabase,
   type SqliteSessionAdministration,
-} from "@pilot/persistence-sqlite";
+} from "@pilotrun/persistence-sqlite";
 import {
   createApplyPatchTool,
   createBuiltinFileListTools,
@@ -49,7 +49,7 @@ import {
   NodeWorkspaceFileSystem,
   NodeWorkspaceBoundary,
   type GitCommandRunner,
-} from "@pilot/tools-builtin";
+} from "@pilotrun/tools-builtin";
 import { ChatEventFactory, ChatEventRenderer } from "./chat-events.js";
 import { CliUserInteraction } from "./cli-user-interaction.js";
 import { type PilotDoctor, renderDoctorReport } from "./diagnostics.js";

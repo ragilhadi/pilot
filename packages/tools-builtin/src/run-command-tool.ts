@@ -9,7 +9,7 @@ import {
   type ToolRisk,
   ToolRecoverySchema,
   type WorkspaceBoundary,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import * as z from "zod";
 import { classifyCommandRisk, type CommandIntent } from "./command-risk.js";
 

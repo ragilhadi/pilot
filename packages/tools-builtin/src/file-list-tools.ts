@@ -6,7 +6,7 @@ import {
   type ToolDefinition,
   type WorkspaceBoundary,
   type WorkspacePath,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import * as z from "zod";
 import { compileGlobPattern } from "./glob-pattern.js";
 import { loadRepositoryIgnoreRules } from "./ignore-rules.js";
