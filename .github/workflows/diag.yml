@@ -11,36 +11,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install ripgrep
-        run: choco install ripgrep -y --no-progress
-      - name: Reproduce inside a temp workspace (like the failing tests do)
+      - name: Compare realpathSync vs realpathSync.native
         shell: pwsh
         run: |
           node -e "
-            const { mkdtempSync, realpathSync, mkdirSync } = require('node:fs');
+            const { mkdtempSync, realpathSync } = require('node:fs');
             const { execFileSync } = require('node:child_process');
             const os = require('node:os');
             const path = require('node:path');
 
-            console.log('os.tmpdir():', JSON.stringify(os.tmpdir()));
             const dir = mkdtempSync(path.join(os.tmpdir(), 'pilot-diag-'));
             console.log('mkdtemp result:', JSON.stringify(dir));
-            const real = realpathSync(dir);
-            console.log('realpathSync(dir):', JSON.stringify(real));
-
-            execFileSync('git', ['init', '-q'], { cwd: dir });
-            execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: dir });
-            execFileSync('git', ['config', 'user.name', 'a'], { cwd: dir });
-            require('node:fs').writeFileSync(path.join(dir, 'f.txt'), 'pilot\n');
-            execFileSync('git', ['add', '.'], { cwd: dir });
-            execFileSync('git', ['commit', '-q', '-m', 'x'], { cwd: dir });
+            console.log('realpathSync(dir):', JSON.stringify(realpathSync(dir)));
+            console.log('realpathSync.native(dir):', JSON.stringify(realpathSync.native(dir)));
 
             const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir }).toString().trim();
-            console.log('git --show-toplevel (cwd=mkdtemp result):', JSON.stringify(top));
-            console.log('path.resolve(top):', JSON.stringify(path.resolve(top)));
-            console.log('path.resolve(top) === real ?', path.resolve(top) === real);
-            console.log('path.resolve(top).toLowerCase() === real.toLowerCase() ?', path.resolve(top).toLowerCase() === real.toLowerCase());
-
-            const rg = execFileSync('rg', ['--json', 'pilot', '--', real]).toString();
-            console.log('rg output:', rg.split(String.fromCharCode(10))[0]);
+            const resolvedTop = path.resolve(top);
+            console.log('path.resolve(git toplevel):', JSON.stringify(resolvedTop));
+            console.log('native === git-resolved ?', realpathSync.native(dir) === resolvedTop);
           "
