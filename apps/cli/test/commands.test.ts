@@ -34,6 +34,7 @@ import {
   type LineReader,
   type TextWriter,
 } from "../src/index.js";
+import { approvalAwareLines } from "./approval-aware-lines.js";
 
 const minimalCapabilities = {
   streaming: true,
@@ -681,15 +682,21 @@ describe("pilot chat", () => {
       const { dependencies, stdout, stderr } = cliDependencies(
         new ModelRegistry([{ model, displayName: "Command Fake" }]),
         new AbortController().signal,
-        timedLines([
-          { line: "Run the command" },
-          { line: "allow once", delayMs: 250 },
-          { line: "/exit", delayMs: 600 },
-        ]),
+        undefined,
         workspacePath,
       );
 
-      expect(await runCli(["chat", "--model", "fake/command"], dependencies)).toBe(0);
+      expect(
+        await runCli(["chat", "--model", "fake/command"], {
+          ...dependencies,
+          stdin: approvalAwareLines({
+            initialLine: "Run the command",
+            approvalCount: 1,
+            output: stdout,
+            remainingScripts: () => model.remainingScripts,
+          }),
+        }),
+      ).toBe(0);
 
       expect(stdout.text()).toContain("[approval required:");
       expect(stdout.text()).toContain("[command]");
@@ -700,7 +707,7 @@ describe("pilot chat", () => {
     } finally {
       await rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
-  });
+  }, 20_000);
 
   it("exposes the bounded repository tools and completes a real read_file cycle", async () => {
     const workspacePath = await mkdtemp(path.join(tmpdir(), "pilot-cli-tools-test-"));

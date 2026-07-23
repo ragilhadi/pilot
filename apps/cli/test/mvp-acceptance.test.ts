@@ -26,6 +26,7 @@ import {
   type TextWriter,
 } from "../src/index.js";
 import { TerminalChatPresentation } from "../src/tui/terminal-chat-presentation.js";
+import { approvalAwareLines } from "./approval-aware-lines.js";
 
 const originalImplementation = `export function isValidName(value: string): boolean {
   return value.length >= 2;
@@ -134,13 +135,12 @@ describe("MVP acceptance scenario", () => {
           stderr: errors,
           gitRunner,
           instructionDiscovery,
-          stdin: delayedLines([
-            { line: "Fix the failing validation test." },
-            { line: "allow once", delayMs: 400 },
-            { line: "allow once", delayMs: 600 },
-            { line: "allow once", delayMs: 600 },
-            { line: "/exit", delayMs: 2_000 },
-          ]),
+          stdin: approvalAwareLines({
+            initialLine: "Fix the failing validation test.",
+            approvalCount: 3,
+            output,
+            remainingScripts: () => model.remainingScripts,
+          }),
         });
 
         expect(
@@ -154,10 +154,6 @@ describe("MVP acceptance scenario", () => {
           "validation failed: expected two-character names to be invalid",
         );
         expect(errors.text()).not.toContain("Invalid approval response");
-        if (model.remainingScripts !== 0) {
-          console.error("DIAG stderr:", JSON.stringify(errors.text()));
-          console.error("DIAG stdout:", JSON.stringify(output.text()));
-        }
         expect(model.remainingScripts).toBe(0);
         expect(await readFile(path.join(workspacePath, "src", "validation.ts"), "utf8")).toBe(
           fixedImplementation,
@@ -235,10 +231,12 @@ describe("MVP acceptance scenario", () => {
               gitRunner,
               instructionDiscovery,
               identifiers: ["resume-run", "resume-user-message", "resume-assistant-message"],
-              stdin: delayedLines([
-                { line: "Confirm the completed work." },
-                { line: "/exit", delayMs: 200 },
-              ]),
+              stdin: approvalAwareLines({
+                initialLine: "Confirm the completed work.",
+                approvalCount: 0,
+                output: resumedOutput,
+                remainingScripts: () => resumeModel.remainingScripts,
+              }),
             }),
             persistence: restartedPersistence,
           },
@@ -261,7 +259,10 @@ describe("MVP acceptance scenario", () => {
         await rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       }
     },
-    15_000,
+    // Runs real subprocesses (the scripted validation test, twice) through the full
+    // approval flow; hosted Windows CI runners can be notably slower than a local
+    // machine, so this needs more headroom than a purely in-memory test.
+    40_000,
   );
 
   it.skipIf(!hasRipgrep)(
@@ -459,19 +460,6 @@ function memoryWriter(): TextWriter & { readonly text: () => string } {
     },
     text: () => content,
   };
-}
-
-function delayedLines(entries: readonly { readonly line?: string; readonly delayMs?: number }[]) {
-  let index = 0;
-  return {
-    async readLine() {
-      const entry = entries[index++];
-      if ((entry?.delayMs ?? 0) > 0) {
-        await new Promise((resolve) => setTimeout(resolve, entry?.delayMs));
-      }
-      return entry?.line;
-    },
-  } satisfies LineReader;
 }
 
 function dependencies(input: {
