@@ -1,6 +1,12 @@
-import { lstat, realpath, stat } from "node:fs/promises";
-import type { Stats } from "node:fs";
+import { lstat, stat } from "node:fs/promises";
+import { realpath as realpathCallback, type Stats } from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
+
+// fs/promises' realpath does not resolve Windows 8.3 short names (e.g. RUNNER~1),
+// while git and other external tools report the long form. Using the native
+// variant keeps this boundary's canonical paths comparable to what those tools emit.
+const realpath = promisify(realpathCallback.native);
 import {
   PilotError,
   type WorkspaceAccess,
