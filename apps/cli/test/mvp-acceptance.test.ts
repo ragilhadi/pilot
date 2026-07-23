@@ -26,6 +26,7 @@ import {
   type TextWriter,
 } from "../src/index.js";
 import { TerminalChatPresentation } from "../src/tui/terminal-chat-presentation.js";
+import { approvalAwareLines } from "./approval-aware-lines.js";
 
 const originalImplementation = `export function isValidName(value: string): boolean {
   return value.length >= 2;
@@ -256,7 +257,10 @@ describe("MVP acceptance scenario", () => {
         await rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
       }
     },
-    15_000,
+    // Runs real subprocesses (the scripted validation test, twice) through the full
+    // approval flow; hosted Windows CI runners can be notably slower than a local
+    // machine, so this needs more headroom than a purely in-memory test.
+    40_000,
   );
 
   it.skipIf(!hasRipgrep)(
@@ -465,58 +469,6 @@ function delayedLines(entries: readonly { readonly line?: string; readonly delay
         await new Promise((resolve) => setTimeout(resolve, entry?.delayMs));
       }
       return entry?.line;
-    },
-  } satisfies LineReader;
-}
-
-/**
- * Drives a chat turn that needs a fixed number of permission approvals, without
- * racing fixed millisecond delays against however long the model/tool cycle
- * actually takes under CI load. Waits for the next "[approval required" marker
- * to actually appear in rendered output before answering it, and waits for the
- * fake model's script queue to drain before sending /exit, so a slow run never
- * gets cancelled mid-flight by an /exit arriving too early.
- */
-function approvalAwareLines(options: {
-  readonly initialLine: string;
-  readonly approvalCount: number;
-  readonly output: { readonly text: () => string };
-  readonly remainingScripts: () => number;
-  readonly pollIntervalMs?: number;
-  readonly exitTimeoutMs?: number;
-}): LineReader {
-  const pollIntervalMs = options.pollIntervalMs ?? 10;
-  const exitTimeoutMs = options.exitTimeoutMs ?? 10_000;
-  let stage: "initial" | "approvals" | "exit" | "done" = "initial";
-  let approvalsSent = 0;
-
-  const countApprovalPrompts = () => options.output.text().split("[approval required").length - 1;
-  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  return {
-    async readLine() {
-      if (stage === "initial") {
-        stage = options.approvalCount > 0 ? "approvals" : "exit";
-        return options.initialLine;
-      }
-      if (stage === "approvals") {
-        const target = approvalsSent + 1;
-        while (countApprovalPrompts() < target) {
-          await sleep(pollIntervalMs);
-        }
-        approvalsSent += 1;
-        if (approvalsSent >= options.approvalCount) stage = "exit";
-        return "allow once";
-      }
-      if (stage === "exit") {
-        stage = "done";
-        const deadline = Date.now() + exitTimeoutMs;
-        while (options.remainingScripts() > 0 && Date.now() < deadline) {
-          await sleep(pollIntervalMs);
-        }
-        return "/exit";
-      }
-      return undefined;
     },
   } satisfies LineReader;
 }
