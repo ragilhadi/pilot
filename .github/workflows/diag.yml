@@ -1,0 +1,29 @@
+name: Diagnose Windows paths
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Compare git toplevel vs Node realpath
+        shell: pwsh
+        run: |
+          Write-Host "cwd (PowerShell): $(Get-Location)"
+          $gitTop = git rev-parse --show-toplevel
+          Write-Host "git rev-parse --show-toplevel: [$gitTop]"
+          node -e "console.log('process.cwd():', JSON.stringify(process.cwd())); console.log('realpathSync(cwd):', JSON.stringify(require('fs').realpathSync(process.cwd()))); const path=require('node:path'); console.log('path.resolve(gitTop):', JSON.stringify(path.resolve(process.argv[1])));" "$gitTop"
+      - name: Install ripgrep
+        run: choco install ripgrep -y --no-progress
+      - name: Show ripgrep JSON path form
+        shell: pwsh
+        run: |
+          $root = git rev-parse --show-toplevel
+          $real = node -e "console.log(require('fs').realpathSync(process.argv[1]))" "$root"
+          Write-Host "real root: [$real]"
+          rg --json "pilot" --max-count 1 -- "$real" | Select-Object -First 3
