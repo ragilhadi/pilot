@@ -1,6 +1,8 @@
+import { realpath as realpathCallback } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { runId, toolCallId } from "@pilot/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -12,10 +14,19 @@ import {
   parseGitStatusPorcelainV2,
 } from "../src/index.js";
 
+const realpathNative = promisify(realpathCallback.native);
+
 let workspacePath: string;
+// Real `git rev-parse --show-toplevel` always reports the fully resolved canonical
+// path (e.g. expanding Windows 8.3 short names), matching NodeWorkspaceBoundary's
+// native-realpath root. The fixture below must mirror that, not echo the raw
+// mkdtemp path, or these tests only pass by accident on machines without any
+// short-name segment in their temp directory.
+let realWorkspacePath: string;
 
 beforeEach(async () => {
   workspacePath = await mkdtemp(path.join(tmpdir(), "pilot-git-tools-test-"));
+  realWorkspacePath = await realpathNative(workspacePath);
   await mkdir(path.join(workspacePath, ".git"));
   await mkdir(path.join(workspacePath, "src"));
   await writeFile(path.join(workspacePath, "src", "file.ts"), "export {};\n");
@@ -163,7 +174,7 @@ function fixtureRunner(options: { readonly root?: string; readonly diff?: string
     run: vi.fn<GitCommandRunner["run"]>(async (args) => {
       const command = args.join(" ");
       if (command.includes("rev-parse --show-toplevel")) {
-        return { stdout: `${options.root ?? workspacePath}\n`, stderr: "" };
+        return { stdout: `${options.root ?? realWorkspacePath}\n`, stderr: "" };
       }
       if (command.includes(" status ")) {
         return {

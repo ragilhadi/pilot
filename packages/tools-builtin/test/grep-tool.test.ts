@@ -104,15 +104,17 @@ class FakeRipgrepRunner implements RipgrepRunner {
 
 describe("grep", () => {
   it("constructs a fixed literal search and normalizes deterministic results", async () => {
-    const secondPath = path.join(workspacePath, "src", "z.ts");
-    const firstPath = path.join(workspacePath, "src", "a.ts");
+    // Real ripgrep reports matches using the same (fully resolved) base path it was
+    // invoked with, i.e. boundary.rootPath, not the raw pre-resolution workspacePath.
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const secondPath = path.join(boundary.rootPath, "src", "z.ts");
+    const firstPath = path.join(boundary.rootPath, "src", "a.ts");
     const runner = new FakeRipgrepRunner([
       beginEvent(secondPath),
       matchEvent(secondPath, "z needle", 8, "needle"),
       beginEvent(firstPath),
       matchEvent(firstPath, "a needle", 2, "needle"),
     ]);
-    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
     const grep = createGrepTool(boundary, runner);
 
     const result = await grep.execute(GrepInputSchema.parse({ query: "needle" }), context());

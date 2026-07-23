@@ -1,9 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Terminal } from "@earendil-works/pi-tui";
+import { realpath as realpathCallback } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const realpathNative = promisify(realpathCallback.native);
 import { InstructionDiscovery, ModelRegistry } from "@pilot/agent-runtime";
 import { sessionId } from "@pilot/core";
 import {
@@ -429,7 +433,11 @@ function fixtureGitRunner(workspacePath: string): GitCommandRunner {
     run: vi.fn(async (args) => {
       const command = args.join(" ");
       if (command.includes("rev-parse --show-toplevel")) {
-        return { stdout: `${workspacePath}\n`, stderr: "" };
+        // Real `git rev-parse --show-toplevel` reports the fully resolved canonical
+        // path (e.g. expanding Windows 8.3 short names), matching the workspace
+        // boundary's native-realpath root.
+        const realWorkspacePath = await realpathNative(workspacePath);
+        return { stdout: `${realWorkspacePath}\n`, stderr: "" };
       }
       if (command.includes(" status ")) {
         return { stdout: "# branch.oid abc\n# branch.head main\n", stderr: "" };

@@ -483,13 +483,17 @@ describe("pilot chat", () => {
 
   it("exposes structured read-only Git status to the model without approval", async () => {
     const workspacePath = await mkdtemp(path.join(tmpdir(), "pilot-cli-git-test-"));
+    // Real `git rev-parse --show-toplevel` reports the fully resolved canonical path
+    // (e.g. expanding Windows 8.3 short names), matching the workspace boundary's
+    // native-realpath root.
+    const realWorkspacePath = await realpathNative(workspacePath);
     try {
       await mkdir(path.join(workspacePath, ".git"));
       const runner: GitCommandRunner = {
         run: vi.fn(async (args) => {
           const command = args.join(" ");
           if (command.includes("rev-parse --show-toplevel")) {
-            return { stdout: `${workspacePath}\n`, stderr: "" };
+            return { stdout: `${realWorkspacePath}\n`, stderr: "" };
           }
           if (command.includes(" status ")) {
             return {
@@ -1155,9 +1159,13 @@ describe("CLI Ollama Cloud priority", () => {
   });
 });
 import { createHash } from "node:crypto";
+import { realpath as realpathCallback } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const realpathNative = promisify(realpathCallback.native);
 
 function sha256(content: string): string {
   return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
