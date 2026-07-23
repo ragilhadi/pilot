@@ -1,5 +1,5 @@
 import { backup, DatabaseSync, type StatementSync } from "node:sqlite";
-import { PilotError } from "@pilot/core";
+import { PilotError } from "@pilotrun/core";
 
 export interface SqliteDatabaseOptions {
   readonly busyTimeoutMs?: number;

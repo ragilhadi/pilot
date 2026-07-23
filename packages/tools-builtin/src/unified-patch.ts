@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import { PilotError, type PilotErrorCode } from "@pilot/core";
+import { PilotError, type PilotErrorCode } from "@pilotrun/core";
 
 const maximumPatchBytes = 1_000_000;
 const maximumHunks = 1_000;

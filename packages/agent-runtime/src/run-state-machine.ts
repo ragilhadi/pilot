@@ -4,7 +4,7 @@ import {
   type RunId,
   type SafeErrorSnapshot,
   type ToolCallId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type RunStateKind =
   | "aborted"

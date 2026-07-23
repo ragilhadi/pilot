@@ -1,4 +1,4 @@
-import { runId, sessionId } from "@pilot/core";
+import { runId, sessionId } from "@pilotrun/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   ContextEngine,

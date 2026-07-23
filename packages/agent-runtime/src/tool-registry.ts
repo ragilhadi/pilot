@@ -6,7 +6,7 @@ import {
   type ToolDefinition,
   type ToolSchemaOutput,
   toolToModelDefinition,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type * as z from "zod";
 
 export class ToolNotFoundError extends PilotError {

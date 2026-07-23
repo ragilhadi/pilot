@@ -10,7 +10,7 @@ import {
   type PermissionScope,
   PilotError,
   type UserInteraction,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type { PermissionPolicyEngine } from "./permission-policy.js";
 
 export type PermissionResolutionMode =

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PilotError, runId, toolCallId } from "@pilot/core";
+import { PilotError, runId, toolCallId } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   createWriteFileTool,

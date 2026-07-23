@@ -1,4 +1,4 @@
-import { ModelError, type ProviderAuth } from "@pilot/core";
+import { ModelError, type ProviderAuth } from "@pilotrun/core";
 
 export type EnvironmentReader = (variable: string) => string | undefined;
 

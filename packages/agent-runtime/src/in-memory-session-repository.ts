@@ -9,7 +9,7 @@ import {
   type SessionId,
   type SessionRepository,
   type SessionSnapshot,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export {
   type AppendMessageOptions,
@@ -19,7 +19,7 @@ export {
   type SessionErrorReason,
   type SessionRepository,
   type SessionSnapshot,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 interface StoredSession {
   readonly id: SessionId;

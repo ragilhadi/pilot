@@ -42,22 +42,22 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 'catalog:'
         version: 0.80.10
-      '@pilot/agent-runtime':
+      '@pilotrun/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
-      '@pilot/core':
+      '@pilotrun/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@pilot/persistence-sqlite':
+      '@pilotrun/persistence-sqlite':
         specifier: workspace:*
         version: link:../../packages/persistence-sqlite
-      '@pilot/provider-openai-compatible':
+      '@pilotrun/provider-openai-compatible':
         specifier: workspace:*
         version: link:../../packages/provider-openai-compatible
-      '@pilot/testkit':
+      '@pilotrun/testkit':
         specifier: workspace:*
         version: link:../../packages/testkit
-      '@pilot/tools-builtin':
+      '@pilotrun/tools-builtin':
         specifier: workspace:*
         version: link:../../packages/tools-builtin
       zod:
@@ -66,16 +66,16 @@ importers:
 
   evals:
     dependencies:
-      '@pilot/agent-runtime':
+      '@pilotrun/agent-runtime':
         specifier: workspace:*
         version: link:../packages/agent-runtime
-      '@pilot/core':
+      '@pilotrun/core':
         specifier: workspace:*
         version: link:../packages/core
-      '@pilot/testkit':
+      '@pilotrun/testkit':
         specifier: workspace:*
         version: link:../packages/testkit
-      '@pilot/tools-builtin':
+      '@pilotrun/tools-builtin':
         specifier: workspace:*
         version: link:../packages/tools-builtin
       zod:
@@ -91,7 +91,7 @@ importers:
 
   packages/agent-runtime:
     dependencies:
-      '@pilot/core':
+      '@pilotrun/core':
         specifier: workspace:*
         version: link:../core
       zod:
@@ -106,13 +106,13 @@ importers:
 
   packages/persistence-sqlite:
     dependencies:
-      '@pilot/core':
+      '@pilotrun/core':
         specifier: workspace:*
         version: link:../core
 
   packages/provider-openai-compatible:
     dependencies:
-      '@pilot/core':
+      '@pilotrun/core':
         specifier: workspace:*
         version: link:../core
       zod:
@@ -121,13 +121,13 @@ importers:
 
   packages/testkit:
     dependencies:
-      '@pilot/core':
+      '@pilotrun/core':
         specifier: workspace:*
         version: link:../core
 
   packages/tools-builtin:
     dependencies:
-      '@pilot/core':
+      '@pilotrun/core':
         specifier: workspace:*
         version: link:../core
       zod:

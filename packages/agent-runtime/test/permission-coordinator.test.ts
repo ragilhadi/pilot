@@ -4,7 +4,7 @@ import {
   type PermissionApprovalRequest,
   type PermissionEvaluationContext,
   type UserInteraction,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   PermissionCoordinator,

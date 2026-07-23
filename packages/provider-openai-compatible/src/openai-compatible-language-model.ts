@@ -15,7 +15,7 @@ import {
   parseModelStreamEvent,
   parseProviderConfiguration,
   type ProviderConfiguration,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import * as z from "zod";
 import {
   type EnvironmentReader,

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
-import { PilotError } from "@pilot/core";
+import { PilotError } from "@pilotrun/core";
 
 const execFileAsync = promisify(execFile);
 

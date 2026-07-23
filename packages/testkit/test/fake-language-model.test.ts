@@ -8,7 +8,7 @@ import {
   parseModelRequest,
   parseModelStreamEvent,
   runId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   delayStep,

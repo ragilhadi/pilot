@@ -9,7 +9,7 @@ import {
   runId,
   type ModelToolDefinition,
   type ModelRequest,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import {
   delayStep,
   eventStep,
@@ -18,7 +18,7 @@ import {
   throwStep,
   toolCallScript,
   unsafeRawEventStep,
-} from "@pilot/testkit";
+} from "@pilotrun/testkit";
 import { describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import {

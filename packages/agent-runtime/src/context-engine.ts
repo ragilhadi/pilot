@@ -7,7 +7,7 @@ import {
   type JsonObject,
   type RunId,
   type SessionId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type ContextContent = AgentMessage | string;
 export type ContextTrust = "trusted" | "untrusted";

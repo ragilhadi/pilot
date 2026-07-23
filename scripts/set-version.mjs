@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-// Every package published to npm under the @pilot scope. Kept in lockstep: one version
+// Every package published to npm under the @pilotrun scope. Kept in lockstep: one version
 // number for the whole release, matching the git tag that triggers publication.
 const publishablePackagePaths = [
   "packages/core",

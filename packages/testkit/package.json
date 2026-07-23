@@ -1,5 +1,5 @@
 {
-  "name": "@pilot/testkit",
+  "name": "@pilotrun/testkit",
   "version": "0.0.1",
   "description": "Deterministic fakes (fake language model, scripted streams) for testing Pilot and its extensions.",
   "license": "MIT",
@@ -21,6 +21,6 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@pilot/core": "workspace:*"
+    "@pilotrun/core": "workspace:*"
   }
 }

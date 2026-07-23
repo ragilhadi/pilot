@@ -1,5 +1,5 @@
 import path from "node:path";
-import { PilotError } from "@pilot/core";
+import { PilotError } from "@pilotrun/core";
 
 export class GlobPatternError extends PilotError {
   constructor(message: string, pattern: string) {

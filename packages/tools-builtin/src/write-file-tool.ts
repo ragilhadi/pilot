@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { defineTool, type ToolDefinition } from "@pilot/core";
+import { defineTool, type ToolDefinition } from "@pilotrun/core";
 import * as z from "zod";
 import type { ChangeJournal } from "./change-journal.js";
 import type { WorkspaceFileSystem } from "./workspace-file-system.js";

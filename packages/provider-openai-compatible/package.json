@@ -1,5 +1,5 @@
 {
-  "name": "@pilot/provider-openai-compatible",
+  "name": "@pilotrun/provider-openai-compatible",
   "version": "0.0.1",
   "description": "OpenAI-compatible language model adapter for Pilot (Ollama, OpenAI, OpenRouter, and similar endpoints).",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@pilot/core": "workspace:*",
+    "@pilotrun/core": "workspace:*",
     "zod": "catalog:"
   }
 }

@@ -14,14 +14,14 @@ try {
   await run(process.execPath, [
     pnpmScript,
     "--filter",
-    "@pilot/cli",
+    "@pilotrun/cli",
     "deploy",
     deploymentPath,
     "--prod",
   ]);
 
   const manifest = JSON.parse(await readFile(path.join(deploymentPath, "package.json"), "utf8"));
-  assertEqual(manifest.name, "@pilot/cli", "deployed package name");
+  assertEqual(manifest.name, "@pilotrun/cli", "deployed package name");
   assertEqual(manifest.bin?.pilot, "./dist/index.js", "pilot executable mapping");
   assertEqual(manifest.engines?.node, ">=22.19.0", "Node.js engine declaration");
 
@@ -30,7 +30,9 @@ try {
   assert(topLevelFiles.includes("node_modules"), "deployment must contain production dependencies");
   assert(!topLevelFiles.includes("src"), "deployment must not contain TypeScript sources");
   assert(!topLevelFiles.includes("test"), "deployment must not contain tests");
-  const installedPilotPackages = await readdir(path.join(deploymentPath, "node_modules", "@pilot"));
+  const installedPilotPackages = await readdir(
+    path.join(deploymentPath, "node_modules", "@pilotrun"),
+  );
   for (const dependency of [
     "agent-runtime",
     "core",
@@ -41,7 +43,7 @@ try {
   ]) {
     assert(
       installedPilotPackages.includes(dependency),
-      `deployment must materialize @pilot/${dependency}`,
+      `deployment must materialize @pilotrun/${dependency}`,
     );
   }
 

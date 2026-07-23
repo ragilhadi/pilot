@@ -1,13 +1,13 @@
 {
-  "name": "@pilot/evals",
+  "name": "@pilotrun/evals",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "dependencies": {
-    "@pilot/agent-runtime": "workspace:*",
-    "@pilot/core": "workspace:*",
-    "@pilot/testkit": "workspace:*",
-    "@pilot/tools-builtin": "workspace:*",
+    "@pilotrun/agent-runtime": "workspace:*",
+    "@pilotrun/core": "workspace:*",
+    "@pilotrun/testkit": "workspace:*",
+    "@pilotrun/tools-builtin": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

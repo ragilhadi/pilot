@@ -1,4 +1,4 @@
-import { type Clock, PilotError, type RunId, type ToolCallId } from "@pilot/core";
+import { type Clock, PilotError, type RunId, type ToolCallId } from "@pilotrun/core";
 import type { WorkspaceFileSystem } from "./workspace-file-system.js";
 
 export type ChangeJournalOperation = "apply" | "rollback";

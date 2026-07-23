@@ -14,7 +14,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { PermissionApprovalRequest } from "@pilot/core";
+import type { PermissionApprovalRequest } from "@pilotrun/core";
 import type { ChatEvent } from "../chat-events.js";
 import type { InteractiveChatPresentation } from "../presentation/chat-presentation.js";
 import type { TerminalCapabilitySnapshot } from "../presentation/presentation-mode.js";

@@ -1,4 +1,4 @@
-import type { ToolRisk } from "@pilot/core";
+import type { ToolRisk } from "@pilotrun/core";
 
 export interface DirectCommandIntent {
   readonly mode: "direct";

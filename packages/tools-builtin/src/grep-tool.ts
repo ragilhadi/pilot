@@ -7,7 +7,7 @@ import {
   PilotError,
   type ToolDefinition,
   type WorkspaceBoundary,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import * as z from "zod";
 import { compileGlobPattern } from "./glob-pattern.js";
 import { WorkspacePathError } from "./workspace-boundary.js";

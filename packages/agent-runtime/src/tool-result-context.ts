@@ -4,7 +4,7 @@ import {
   type JsonObject,
   type JsonValue,
   type ToolCallId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export interface ToolResultContextPolicy {
   /** Maximum UTF-8 bytes of JSON passed to the model for one tool result. */

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { chmod, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { WorkspaceBoundary, WorkspacePath } from "@pilot/core";
+import type { WorkspaceBoundary, WorkspacePath } from "@pilotrun/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NodeWorkspaceBoundary, NodeWorkspaceFileSystem } from "../src/index.js";
 

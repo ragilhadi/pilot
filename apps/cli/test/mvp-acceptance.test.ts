@@ -8,16 +8,16 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const realpathNative = promisify(realpathCallback.native);
-import { InstructionDiscovery, ModelRegistry } from "@pilot/agent-runtime";
-import { sessionId } from "@pilot/core";
+import { InstructionDiscovery, ModelRegistry } from "@pilotrun/agent-runtime";
+import { sessionId } from "@pilotrun/core";
 import {
   createSqliteRepositories,
   SqliteDatabase,
   SqliteMigrationRunner,
   SqliteSessionAdministration,
-} from "@pilot/persistence-sqlite";
-import type { GitCommandRunner } from "@pilot/tools-builtin";
-import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilot/testkit";
+} from "@pilotrun/persistence-sqlite";
+import type { GitCommandRunner } from "@pilotrun/tools-builtin";
+import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilotrun/testkit";
 import { describe, expect, it, vi } from "vitest";
 import {
   NodeInstructionFileReader,

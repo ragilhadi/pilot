@@ -6,7 +6,7 @@ import {
   RetryPolicySchema,
   type SafeErrorSnapshot,
   toSafeErrorSnapshot,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { ModelStreamProtocolError } from "./model-stream-accumulator.js";
 
 export type RetrySafety =

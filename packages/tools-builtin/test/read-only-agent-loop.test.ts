@@ -1,9 +1,9 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ApplicationRunner, ModelRegistry, ToolRegistry } from "@pilot/agent-runtime";
-import { parseModelRequest, runId } from "@pilot/core";
-import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilot/testkit";
+import { ApplicationRunner, ModelRegistry, ToolRegistry } from "@pilotrun/agent-runtime";
+import { parseModelRequest, runId } from "@pilotrun/core";
+import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilotrun/testkit";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createReadFileTool, NodeWorkspaceBoundary } from "../src/index.js";
 

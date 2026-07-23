@@ -1,5 +1,5 @@
 {
-  "name": "@pilot/persistence-sqlite",
+  "name": "@pilotrun/persistence-sqlite",
   "version": "0.0.1",
   "description": "SQLite-backed session, run, and checkpoint persistence for Pilot.",
   "license": "MIT",
@@ -21,6 +21,6 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@pilot/core": "workspace:*"
+    "@pilotrun/core": "workspace:*"
   }
 }

@@ -8,7 +8,7 @@ import {
   type PersistenceRepositories,
   type SessionId,
   type SessionSnapshot,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type { SqliteDatabase } from "./sqlite-database.js";
 
 export interface SessionSummary {

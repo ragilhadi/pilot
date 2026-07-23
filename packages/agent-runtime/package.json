@@ -1,5 +1,5 @@
 {
-  "name": "@pilot/agent-runtime",
+  "name": "@pilotrun/agent-runtime",
   "version": "0.0.1",
   "description": "Deterministic agent orchestration runtime for Pilot: state machine, budgets, context, permissions.",
   "license": "MIT",
@@ -21,7 +21,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@pilot/core": "workspace:*",
+    "@pilotrun/core": "workspace:*",
     "zod": "catalog:"
   }
 }

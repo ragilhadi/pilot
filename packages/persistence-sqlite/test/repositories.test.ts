@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { messageId, parseAgentMessage, runId, sessionId, toolCallId } from "@pilot/core";
+import { messageId, parseAgentMessage, runId, sessionId, toolCallId } from "@pilotrun/core";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createSqliteRepositories,

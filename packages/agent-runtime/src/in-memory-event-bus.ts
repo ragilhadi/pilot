@@ -3,7 +3,7 @@ import {
   EventDeliveryError,
   type EventPublisher,
   type EventSubscriber,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type Unsubscribe = () => void;
 

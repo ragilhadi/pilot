@@ -8,7 +8,7 @@ import {
   type ModelRequest,
   type RunId,
   type SessionId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import {
   ContextEngine,
   ContextEngineError,

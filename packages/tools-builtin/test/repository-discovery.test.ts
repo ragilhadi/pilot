@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CancellationError } from "@pilot/core";
+import { CancellationError } from "@pilotrun/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type GitCommandRunner,

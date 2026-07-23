@@ -5,7 +5,7 @@ import {
   PilotError,
   type AgentMessage,
   type MessageId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { Utf8HeuristicTokenEstimator, type ContextTokenEstimator } from "./context-engine.js";
 
 export interface ConversationSummaryRequest {

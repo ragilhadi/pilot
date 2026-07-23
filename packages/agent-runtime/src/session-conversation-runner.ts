@@ -15,11 +15,11 @@ import {
   type SessionRepository,
   type SessionSnapshot,
   type TokenUsage,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type { ApplicationRunResult, ApplicationRunner } from "./application-runner.js";
 import type { RunBudgetPolicy } from "./run-budget.js";
 import { RunInterruptionQueue } from "./run-interruption-queue.js";
-import type { RetryPolicy } from "@pilot/core";
+import type { RetryPolicy } from "@pilotrun/core";
 
 export type ConversationModelRequest = Omit<ModelRequest, "messages">;
 

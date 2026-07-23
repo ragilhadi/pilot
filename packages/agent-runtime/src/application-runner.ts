@@ -19,7 +19,7 @@ import {
   toSafeErrorSnapshot,
   ToolContractError,
   type UserInteraction,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import {
   type ModelStreamOutcome,
   ModelStreamAccumulator,

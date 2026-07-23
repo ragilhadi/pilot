@@ -1,4 +1,4 @@
-import { runId, toolCallId, type SafeErrorSnapshot, type ToolCallId } from "@pilot/core";
+import { runId, toolCallId, type SafeErrorSnapshot, type ToolCallId } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   allowedRunActionTypes,

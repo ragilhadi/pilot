@@ -1,4 +1,4 @@
-import { CancellationError, ModelContractValidationError, ModelError } from "@pilot/core";
+import { CancellationError, ModelContractValidationError, ModelError } from "@pilotrun/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   calculateRetryDelay,

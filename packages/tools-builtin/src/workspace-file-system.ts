@@ -7,7 +7,7 @@ import {
   PilotError,
   type WorkspaceBoundary,
   type WorkspacePath,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 const defaultMaximumFileBytes = 10_000_000;
 

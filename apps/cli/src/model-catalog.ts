@@ -1,11 +1,11 @@
-import { ModelRegistry } from "@pilot/agent-runtime";
+import { ModelRegistry } from "@pilotrun/agent-runtime";
 import {
   ModelCapabilitiesSchema,
   ModelContractValidationError,
   ProviderConfigurationSchema,
-} from "@pilot/core";
-import { type Fetch, OpenAICompatibleLanguageModel } from "@pilot/provider-openai-compatible";
-import { FakeLanguageModel, textResponseScript } from "@pilot/testkit";
+} from "@pilotrun/core";
+import { type Fetch, OpenAICompatibleLanguageModel } from "@pilotrun/provider-openai-compatible";
+import { FakeLanguageModel, textResponseScript } from "@pilotrun/testkit";
 import * as z from "zod";
 
 export const compatibleModelsEnvironmentVariable = "PILOT_OPENAI_COMPATIBLE_MODELS_JSON" as const;

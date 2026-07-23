@@ -7,7 +7,7 @@ import {
   type RunId,
   toSafeErrorSnapshot,
   type ToolCallId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import type { ToolRegistry } from "./tool-registry.js";
 import { recoveryForToolError } from "./tool-recovery.js";
 

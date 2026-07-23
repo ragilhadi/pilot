@@ -5,7 +5,7 @@ import {
   PilotError,
   type WorkspaceBoundary,
   type WorkspacePath,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import { type GitCommandRunner, type GitMetadata, inspectGitMetadata } from "./git-metadata.js";
 import { type IgnoreRuleSource, loadRepositoryIgnoreRules } from "./ignore-rules.js";
 import { WorkspacePathError } from "./workspace-boundary.js";

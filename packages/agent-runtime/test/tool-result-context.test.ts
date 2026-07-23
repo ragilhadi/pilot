@@ -1,4 +1,4 @@
-import { toolCallId } from "@pilot/core";
+import { toolCallId } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import { ToolResultContextError, ToolResultContextFormatter } from "../src/index.js";
 

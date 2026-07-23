@@ -13,33 +13,33 @@ const workspaceRoot = path.resolve(import.meta.dirname, "../..");
 
 const layerRules: readonly LayerRule[] = [
   {
-    packageName: "@pilot/core",
+    packageName: "@pilotrun/core",
     sourceDirectory: path.join(workspaceRoot, "packages/core/src"),
     allowedPilotImports: new Set(),
     allowNodeBuiltins: false,
   },
   {
-    packageName: "@pilot/agent-runtime",
+    packageName: "@pilotrun/agent-runtime",
     sourceDirectory: path.join(workspaceRoot, "packages/agent-runtime/src"),
-    allowedPilotImports: new Set(["@pilot/core"]),
+    allowedPilotImports: new Set(["@pilotrun/core"]),
     allowNodeBuiltins: false,
   },
   {
-    packageName: "@pilot/testkit",
+    packageName: "@pilotrun/testkit",
     sourceDirectory: path.join(workspaceRoot, "packages/testkit/src"),
-    allowedPilotImports: new Set(["@pilot/core"]),
+    allowedPilotImports: new Set(["@pilotrun/core"]),
     allowNodeBuiltins: false,
   },
   {
-    packageName: "@pilot/provider-openai-compatible",
+    packageName: "@pilotrun/provider-openai-compatible",
     sourceDirectory: path.join(workspaceRoot, "packages/provider-openai-compatible/src"),
-    allowedPilotImports: new Set(["@pilot/core"]),
+    allowedPilotImports: new Set(["@pilotrun/core"]),
     allowNodeBuiltins: true,
   },
   {
-    packageName: "@pilot/tools-builtin",
+    packageName: "@pilotrun/tools-builtin",
     sourceDirectory: path.join(workspaceRoot, "packages/tools-builtin/src"),
-    allowedPilotImports: new Set(["@pilot/core"]),
+    allowedPilotImports: new Set(["@pilotrun/core"]),
     allowNodeBuiltins: true,
   },
 ];
@@ -89,7 +89,7 @@ describe("package dependency boundaries", () => {
             violations.push(`${path.relative(workspaceRoot, filePath)} imports ${specifier}`);
           }
 
-          if (specifier.startsWith("@pilot/") && !rule.allowedPilotImports.has(specifier)) {
+          if (specifier.startsWith("@pilotrun/") && !rule.allowedPilotImports.has(specifier)) {
             violations.push(`${path.relative(workspaceRoot, filePath)} imports ${specifier}`);
           }
         }

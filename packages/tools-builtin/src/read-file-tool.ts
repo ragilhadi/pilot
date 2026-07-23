@@ -8,7 +8,7 @@ import {
   type PilotErrorCode,
   type ToolDefinition,
   type WorkspaceBoundary,
-} from "@pilot/core";
+} from "@pilotrun/core";
 import * as z from "zod";
 
 const defaultMaximumFileBytes = 5_000_000;

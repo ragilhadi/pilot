@@ -9,7 +9,7 @@ import {
   parseModelKey,
   parseModelRequest,
   PilotError,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type ModelCapabilityName =
   | "configurableReasoningEffort"

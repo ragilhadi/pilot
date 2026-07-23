@@ -9,7 +9,7 @@ import {
   PilotError,
   TokenUsageSchema,
   type ToolCallId,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export type StreamProtocolViolation =
   | "conflicting-duplicate"

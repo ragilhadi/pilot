@@ -16,7 +16,7 @@ import {
   type PermissionRuleSource,
   type PermissionScope,
   PilotError,
-} from "@pilot/core";
+} from "@pilotrun/core";
 
 export const permissionSourcePrecedence: Readonly<Record<PermissionRuleSource, number>> =
   Object.freeze({

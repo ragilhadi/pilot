@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { access } from "node:fs/promises";
-import { diagnoseSqliteDatabase, type SqliteDatabase } from "@pilot/persistence-sqlite";
+import { diagnoseSqliteDatabase, type SqliteDatabase } from "@pilotrun/persistence-sqlite";
 
 export type DiagnosticStatus = "fail" | "pass" | "warn";
 

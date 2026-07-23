@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ToolRegistry } from "@pilot/agent-runtime";
-import { CancellationError, runId, toolCallId, type ToolExecutionContext } from "@pilot/core";
+import { ToolRegistry } from "@pilotrun/agent-runtime";
+import { CancellationError, runId, toolCallId, type ToolExecutionContext } from "@pilotrun/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   compileGlobPattern,

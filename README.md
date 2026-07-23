@@ -13,7 +13,7 @@ you can resume them later.
 ## Install
 
 ```sh
-npm install -g @pilot/cli
+npm install -g @pilotrun/cli
 ```
 
 This installs the `pilot` command globally. It works from any folder on your machine:
@@ -110,7 +110,7 @@ git push --follow-tags
 Then publish a GitHub Release from that tag (via the GitHub UI, or `gh release create pilot-v0.2.0
 --generate-notes`). Publishing the release triggers `.github/workflows/release.yml`, which verifies
 the tag matches the package version, re-runs the full check/test/build gate, and then publishes all
-`@pilot/*` packages to npm. The workflow can also be run manually via `workflow_dispatch` for a
+`@pilotrun/*` packages to npm. The workflow can also be run manually via `workflow_dispatch` for a
 retry, in which case it publishes whatever version is currently in `apps/cli/package.json`.
 
 ## License
