@@ -231,10 +231,12 @@ describe("MVP acceptance scenario", () => {
               gitRunner,
               instructionDiscovery,
               identifiers: ["resume-run", "resume-user-message", "resume-assistant-message"],
-              stdin: delayedLines([
-                { line: "Confirm the completed work." },
-                { line: "/exit", delayMs: 200 },
-              ]),
+              stdin: approvalAwareLines({
+                initialLine: "Confirm the completed work.",
+                approvalCount: 0,
+                output: resumedOutput,
+                remainingScripts: () => resumeModel.remainingScripts,
+              }),
             }),
             persistence: restartedPersistence,
           },
@@ -458,19 +460,6 @@ function memoryWriter(): TextWriter & { readonly text: () => string } {
     },
     text: () => content,
   };
-}
-
-function delayedLines(entries: readonly { readonly line?: string; readonly delayMs?: number }[]) {
-  let index = 0;
-  return {
-    async readLine() {
-      const entry = entries[index++];
-      if ((entry?.delayMs ?? 0) > 0) {
-        await new Promise((resolve) => setTimeout(resolve, entry?.delayMs));
-      }
-      return entry?.line;
-    },
-  } satisfies LineReader;
 }
 
 function dependencies(input: {
