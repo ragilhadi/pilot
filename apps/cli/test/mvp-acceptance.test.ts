@@ -154,6 +154,10 @@ describe("MVP acceptance scenario", () => {
           "validation failed: expected two-character names to be invalid",
         );
         expect(errors.text()).not.toContain("Invalid approval response");
+        if (model.remainingScripts !== 0) {
+          console.error("DIAG stderr:", JSON.stringify(errors.text()));
+          console.error("DIAG stdout:", JSON.stringify(output.text()));
+        }
         expect(model.remainingScripts).toBe(0);
         expect(await readFile(path.join(workspacePath, "src", "validation.ts"), "utf8")).toBe(
           fixedImplementation,
