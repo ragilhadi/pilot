@@ -1,0 +1,19 @@
+packages:
+  - apps/*
+  - evals
+  - packages/*
+
+catalog:
+  '@earendil-works/pi-tui': ^0.80.10
+  node-pty: ^1.1.0
+  zod: 4.4.3
+
+catalogMode: strict
+
+injectWorkspacePackages: true
+
+syncInjectedDepsAfterScripts:
+  - build
+
+allowBuilds:
+  node-pty: true

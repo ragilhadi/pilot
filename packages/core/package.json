@@ -1,0 +1,26 @@
+{
+  "name": "@pilot/core",
+  "version": "0.0.1",
+  "description": "Provider-neutral domain types and ports for the Pilot coding-agent platform.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  }
+}

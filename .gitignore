@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.pnpm-store/
+.claude/
+
+# Internal planning/spec docs — not part of the published project.
+/PLAN.md
+/IMPLEMENTATION_PLAN.md
+/docs/

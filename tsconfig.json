@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/agent-runtime" },
+    { "path": "./packages/provider-openai-compatible" },
+    { "path": "./packages/persistence-sqlite" },
+    { "path": "./packages/tools-builtin" },
+    { "path": "./packages/testkit" },
+    { "path": "./apps/cli" },
+    { "path": "./evals" }
+  ]
+}

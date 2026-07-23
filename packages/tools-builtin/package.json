@@ -1,0 +1,27 @@
+{
+  "name": "@pilot/tools-builtin",
+  "version": "0.0.1",
+  "description": "Built-in filesystem, patch, shell, and Git tools for the Pilot coding agent.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@pilot/core": "workspace:*",
+    "zod": "catalog:"
+  }
+}

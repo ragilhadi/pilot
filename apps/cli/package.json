@@ -1,0 +1,40 @@
+{
+  "name": "@pilot/cli",
+  "version": "0.0.1",
+  "description": "Terminal-first, provider-neutral coding agent CLI.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "bin": {
+    "pilot": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "predeploy": "pnpm build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-tui": "catalog:",
+    "@pilot/agent-runtime": "workspace:*",
+    "@pilot/core": "workspace:*",
+    "@pilot/persistence-sqlite": "workspace:*",
+    "@pilot/provider-openai-compatible": "workspace:*",
+    "@pilot/testkit": "workspace:*",
+    "@pilot/tools-builtin": "workspace:*",
+    "zod": "catalog:"
+  }
+}

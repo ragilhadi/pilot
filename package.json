@@ -1,0 +1,34 @@
+{
+  "name": "pilot",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A terminal-first, provider-neutral coding-agent platform.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "pnpm@11.9.0",
+  "scripts": {
+    "build": "tsc -b --pretty false",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck",
+    "clean": "tsc -b --clean",
+    "eval": "vitest run --config vitest.evals.config.ts",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "link:global": "pnpm build && pnpm --filter @pilot/cli exec npm link",
+    "unlink:global": "pnpm --filter @pilot/cli exec npm unlink -g @pilot/cli",
+    "package:smoke": "node scripts/package-smoke.mjs",
+    "release:version": "node scripts/set-version.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty false"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.4",
+    "@types/node": "22.18.0",
+    "node-pty": "catalog:",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

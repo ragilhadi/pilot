@@ -1,0 +1,17 @@
+{
+  "name": "@pilot/evals",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@pilot/agent-runtime": "workspace:*",
+    "@pilot/core": "workspace:*",
+    "@pilot/testkit": "workspace:*",
+    "@pilot/tools-builtin": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.0",
+    "vitest": "4.1.10"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "../dist/evals",
+    "rootDir": ".",
+    "tsBuildInfoFile": "../dist/evals.tsbuildinfo",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["**/*.ts"],
+  "references": [
+    { "path": "../packages/core" },
+    { "path": "../packages/agent-runtime" },
+    { "path": "../packages/testkit" },
+    { "path": "../packages/tools-builtin" }
+  ]
+}
