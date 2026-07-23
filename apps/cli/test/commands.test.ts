@@ -742,6 +742,7 @@ describe("pilot chat", () => {
       expect(stderr.text()).toBe("");
       expect(model.calls[0]?.request.tools.map(({ name }) => name)).toEqual([
         "apply_patch",
+        "create_file",
         "git_diff",
         "git_status",
         "glob",
@@ -749,7 +750,6 @@ describe("pilot chat", () => {
         "list_files",
         "read_file",
         "run_command",
-        "write_file",
       ]);
       expect(model.calls[1]?.request.messages.at(-1)).toMatchObject({
         role: "tool",

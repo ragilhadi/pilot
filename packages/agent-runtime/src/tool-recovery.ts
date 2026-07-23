@@ -31,7 +31,7 @@ export function recoveryForToolError(code: PilotErrorCode): ToolRecovery {
         "revise-request",
         "none",
         true,
-        "write_file only creates new files and the target already exists. Do not retry write_file; " +
+        "create_file only creates new files and the target already exists. Do not retry create_file; " +
           "read the file and use apply_patch to modify it instead.",
       );
     case "PILOT_PATCH_UNSUPPORTED":

@@ -75,7 +75,7 @@ export class WorkspaceFileExistsError extends PilotError {
       code: "PILOT_WORKSPACE_FILE_EXISTS",
       message: `Workspace file ${relativePath} already exists`,
       safeMessage:
-        "write_file only creates new files. The target already exists; use apply_patch to modify it.",
+        "create_file only creates new files. The target already exists; use apply_patch to modify it.",
       metadata: { path: relativePath.split("\\").join("/") },
     });
   }
