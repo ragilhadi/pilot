@@ -1,8 +1,17 @@
 import path from "node:path";
 import { type Component, Markdown, truncateToWidth } from "@earendil-works/pi-tui";
+import type { JsonValue } from "@pilotrun/core";
 import type { TerminalCapabilitySnapshot } from "../../presentation/presentation-mode.js";
 import { sanitizeTerminalText } from "../../presentation/sanitize-terminal-text.js";
-import { formatDuration, previewLines, safeJson, wrapPlain } from "../render-helpers.js";
+import {
+  formatDuration,
+  patchFromInput,
+  previewLines,
+  safeJson,
+  styleDiffLine,
+  wrapPlain,
+  wrapStyled,
+} from "../render-helpers.js";
 import type {
   TerminalUiState,
   ToolTranscriptBlock,
@@ -60,8 +69,14 @@ export class PilotScreen implements Component {
       width,
     );
     const lines = [header, this.#theme.muted("─".repeat(Math.max(1, width))), ""];
+    let previous: TranscriptBlock | undefined;
     for (const block of state.blocks) {
+      if (block.kind === "user" && previous !== undefined) {
+        const divider = this.#capabilities.unicode ? "┄" : "-";
+        lines.push(this.#theme.muted(divider.repeat(Math.min(Math.max(1, width), 32))), "");
+      }
       lines.push(...this.#renderBlockCached(block, width, state.showToolDetails), "");
+      previous = block;
     }
     if (this.#blockCache.size > state.blocks.length * 3 + 30) {
       const activeIds = new Set(state.blocks.map(({ id }) => id));
@@ -93,12 +108,17 @@ export class PilotScreen implements Component {
 
   #renderBlock(block: TranscriptBlock, width: number): string[] {
     if (block.kind === "user") {
-      return [this.#theme.accent("You"), ...wrapPlain(block.text, width, 2)];
+      const label = this.#capabilities.unicode ? "› You" : "You";
+      return [this.#theme.accent(label), ...wrapPlain(block.text, width, 2)];
     }
     if (block.kind === "assistant") {
-      const status = block.status === "streaming" ? this.#theme.muted("  working") : "";
+      const marker = this.#capabilities.unicode ? "◆ " : "";
+      const status =
+        block.status === "streaming"
+          ? this.#theme.muted(this.#capabilities.unicode ? "  ● working" : "  working")
+          : "";
       const markdown = new Markdown(sanitizeTerminalText(block.text), 1, 0, this.#theme.markdown);
-      return [`${this.#theme.strong("Pilot")}${status}`, ...markdown.render(width)];
+      return [`${this.#theme.strong(`${marker}Pilot`)}${status}`, ...markdown.render(width)];
     }
     if (block.kind === "tool") {
       return renderTool(
@@ -134,7 +154,7 @@ export class PilotScreen implements Component {
           .filter((value): value is string => value !== undefined)
           .join(", ");
         const decorate = command.status === "completed" ? this.#theme.success : this.#theme.danger;
-        lines.push(...wrapPlain(decorate(`  command ${command.command}  ${details}`), width, 0));
+        lines.push(...wrapStyled(`  command ${command.command}  ${details}`, width, 0, decorate));
       }
       if (summary.tests.length > 0) {
         const failedTests = summary.tests.filter(({ status }) => status !== "completed").length;
@@ -167,7 +187,7 @@ export class PilotScreen implements Component {
           : block.tone === "success"
             ? this.#theme.success
             : this.#theme.info;
-    return wrapPlain(decorate(block.text), width, 0);
+    return wrapStyled(block.text, width, 0, decorate);
   }
 }
 
@@ -206,17 +226,130 @@ function renderTool(
       width,
     ),
   ];
-  if (block.status === "failed" || block.status === "cancelled" || expanded) {
-    lines.push(...wrapPlain(theme.muted(`input ${safeJson(block.input)}`), width, 2));
-    if (block.output !== undefined) {
-      lines.push(...wrapPlain(theme.muted(`output ${safeJson(block.output)}`), width, 2));
-    }
-    if (block.commandOutput.length > 0) {
-      lines.push(...previewLines(block.commandOutput, width - 2, 12).map((line) => `  ${line}`));
-    }
-  } else if (block.commandOutput.length > 0) {
-    const summary = block.commandOutput.trim().split(/\r?\n/u).at(-1) ?? "";
-    if (summary.length > 0) lines.push(...wrapPlain(theme.muted(summary), width, 2));
+  const detail = expanded || block.status === "failed" || block.status === "cancelled";
+  if (block.name === "run_command") {
+    lines.push(...renderCommandBody(block, width, theme, detail));
+  } else if (block.name === "apply_patch") {
+    lines.push(...renderPatchBody(block, width, theme, detail));
+  } else if (block.name === "read_file" || block.name === "write_file") {
+    lines.push(...renderFileBody(block, width, theme, detail));
+  } else {
+    lines.push(...renderGenericBody(block, width, theme, detail));
   }
   return lines;
+}
+
+/** Reconstruct a human-readable command line from a run_command tool input. */
+function commandLine(input: JsonValue): string | undefined {
+  const record = objectValue(input);
+  if (record === undefined) return undefined;
+  if (typeof record.command === "string") return record.command;
+  const command = objectValue(record.command);
+  if (command === undefined) return undefined;
+  if (command.mode === "shell" && typeof command.command === "string") return command.command;
+  if (command.mode === "direct" && typeof command.executable === "string") {
+    const args = Array.isArray(command.args)
+      ? command.args.filter((value): value is string => typeof value === "string")
+      : [];
+    return [command.executable, ...args].join(" ");
+  }
+  return undefined;
+}
+
+function renderCommandBody(
+  block: ToolTranscriptBlock,
+  width: number,
+  theme: PilotTheme,
+  detail: boolean,
+): string[] {
+  const lines: string[] = [];
+  const command = commandLine(block.input);
+  if (command !== undefined) lines.push(...wrapStyled(`$ ${command}`, width, 2, theme.accent));
+  const output = block.commandOutput.trim();
+  if (detail) {
+    if (command === undefined) {
+      lines.push(...wrapStyled(`input ${safeJson(block.input)}`, width, 2, theme.muted));
+    }
+    if (output.length > 0) {
+      lines.push(...previewLines(output, width - 2, 12).map((line) => `  ${line}`));
+    }
+    const exitCode = numberField(block.output, "exitCode");
+    if (exitCode !== undefined) {
+      lines.push((exitCode === 0 ? theme.success : theme.danger)(`  exit ${exitCode}`));
+    }
+  } else if (output.length > 0) {
+    const summary = output.split(/\r?\n/u).at(-1) ?? "";
+    if (summary.length > 0) lines.push(...wrapStyled(summary, width, 2, theme.muted));
+  }
+  return lines;
+}
+
+function renderPatchBody(
+  block: ToolTranscriptBlock,
+  width: number,
+  theme: PilotTheme,
+  detail: boolean,
+): string[] {
+  const patch = patchFromInput(block.input);
+  if (patch === undefined) return renderGenericBody(block, width, theme, detail);
+  const diffLines = patch.split("\n");
+  const maxLines = detail ? diffLines.length : 6;
+  const lines = diffLines
+    .slice(0, maxLines)
+    .map((line) => truncateToWidth(`  ${styleDiffLine(sanitizeTerminalText(line), theme)}`, width));
+  if (diffLines.length > maxLines) {
+    lines.push(theme.muted(`  … ${diffLines.length - maxLines} more lines`));
+  }
+  return lines;
+}
+
+function renderFileBody(
+  block: ToolTranscriptBlock,
+  width: number,
+  theme: PilotTheme,
+  detail: boolean,
+): string[] {
+  const path = stringField(block.input, "path") ?? stringField(block.input, "file");
+  const lines: string[] = [];
+  if (path !== undefined) lines.push(...wrapStyled(path, width, 2, theme.muted));
+  if (detail) {
+    lines.push(...renderGenericBody(block, width, theme, path === undefined));
+  }
+  return lines;
+}
+
+function renderGenericBody(
+  block: ToolTranscriptBlock,
+  width: number,
+  theme: PilotTheme,
+  detail: boolean,
+): string[] {
+  if (!detail) return [];
+  const lines = [...wrapStyled(`input ${safeJson(block.input)}`, width, 2, theme.muted)];
+  if (block.output !== undefined) {
+    lines.push(...wrapStyled(`output ${safeJson(block.output)}`, width, 2, theme.muted));
+  }
+  if (block.commandOutput.length > 0) {
+    lines.push(...previewLines(block.commandOutput, width - 2, 12).map((line) => `  ${line}`));
+  }
+  return lines;
+}
+
+function objectValue(
+  value: JsonValue | undefined,
+): Readonly<Record<string, JsonValue>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, JsonValue>>)
+    : undefined;
+}
+
+function stringField(value: JsonValue, key: string): string | undefined {
+  const field = objectValue(value)?.[key];
+  return typeof field === "string" ? field : undefined;
+}
+
+function numberField(value: JsonValue | undefined, key: string): number | undefined {
+  if (value === undefined) return undefined;
+  const field = objectValue(value)?.[key];
+  return typeof field === "number" ? field : undefined;
 }

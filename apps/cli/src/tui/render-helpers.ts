@@ -11,6 +11,23 @@ export function wrapPlain(text: string, width: number, padding: number): string[
     .flatMap((line) => wrapTextWithAnsi(line, available).map((wrapped) => prefix + wrapped));
 }
 
+/**
+ * Wrap raw (unstyled) text and apply a color function to each wrapped line.
+ *
+ * Styling must happen after wrapping because {@link wrapPlain} sanitizes control
+ * bytes — including the ESC that starts ANSI codes — so pre-styled text passed
+ * through it would have its color sequences corrupted. Sanitizing the raw text
+ * first and coloring afterward keeps both the safety guarantee and the color.
+ */
+export function wrapStyled(
+  text: string,
+  width: number,
+  padding: number,
+  style: (line: string) => string,
+): string[] {
+  return wrapPlain(text, width, padding).map((line) => style(line));
+}
+
 export function safeJson(value: unknown): string {
   if (value === undefined) return "";
   try {

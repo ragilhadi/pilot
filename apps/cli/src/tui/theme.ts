@@ -41,6 +41,11 @@ export function createPilotTheme(
   const info = style(palette.info, 39);
   const strong = style(1, 22);
   const inverse = style(7, 27);
+  const unicode = capabilities.unicode;
+  const codeTopCorner = unicode ? "┌─" : "+-";
+  const codeBottomCorner = unicode ? "└─" : "+-";
+  const codeBar = unicode ? "│ " : "| ";
+  const codeFenceLabel = (fence: string): string => fence.replace(/`+/gu, "").trim();
   const select: SelectListTheme = {
     selectedPrefix: accent,
     selectedText: inverse,
@@ -60,12 +65,19 @@ export function createPilotTheme(
     select,
     editor: { borderColor: accent, selectList: select },
     markdown: {
-      heading: strong,
+      heading: (text) => strong(accent(text)),
       link: accent,
       linkUrl: muted,
-      code: warning,
+      code: (text) => warning(text),
       codeBlock: (text) => text,
-      codeBlockBorder: muted,
+      // The fence callback cannot know the viewport width, so instead of a full
+      // rule we render a labeled top corner (```lang) and a plain bottom/langless
+      // corner, and frame every code line with the styled left bar below.
+      codeBlockBorder: (fence) => {
+        const label = codeFenceLabel(fence);
+        return muted(label.length > 0 ? `${codeTopCorner} ${label}` : codeBottomCorner);
+      },
+      codeBlockIndent: muted(codeBar),
       quote: muted,
       quoteBorder: accent,
       hr: muted,

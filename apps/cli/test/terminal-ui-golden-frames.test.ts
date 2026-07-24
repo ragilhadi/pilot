@@ -70,6 +70,74 @@ describe("terminal UI golden frames", () => {
     expect(theme.accent("selected")).toContain("selected");
   });
 
+  it("keeps ANSI intact and never emits the replacement character in colored output", () => {
+    const theme = createPilotTheme({ ...capabilities, color: true });
+    const frame = new PilotScreen(
+      () => ({ ...goldenState, showToolDetails: true }),
+      theme,
+      { ...capabilities, color: true },
+      "C:/workspace/pilot",
+    )
+      .render(100)
+      .join("\n");
+    expect(frame).toContain("\u001b[");
+    expect(frame).not.toContain("\uFFFD");
+  });
+
+  it("frames fenced code blocks with a language label and stays width-safe", () => {
+    const state: TerminalUiState = {
+      ...goldenState,
+      blocks: [
+        {
+          kind: "assistant",
+          id: "assistant:code",
+          responseId: "response:code",
+          text: ["Here is the command:", "", "```bash", "g++ main.cpp -o main", "```"].join("\n"),
+          status: "completed",
+        },
+      ],
+    };
+    for (const width of [60, 80, 120]) {
+      const theme = createPilotTheme({ ...capabilities, columns: width });
+      const frame = new PilotScreen(
+        () => state,
+        theme,
+        { ...capabilities, columns: width },
+        "C:/workspace/pilot",
+      ).render(width);
+      expect(frame.every((line) => visibleWidth(line) <= width)).toBe(true);
+      const joined = frame.join("\n");
+      expect(joined).toContain("bash");
+      expect(joined).toContain("g++ main.cpp -o main");
+    }
+  });
+
+  it("shows the command line and exit code for an expanded run_command tool", () => {
+    const state: TerminalUiState = {
+      ...goldenState,
+      showToolDetails: true,
+      blocks: [
+        {
+          kind: "tool",
+          id: "tool:cmd",
+          callId: "call:cmd",
+          name: "run_command",
+          input: { command: "pnpm test validation" },
+          output: { exitCode: 2 },
+          commandOutput: "1 failed",
+          durationMs: 900,
+          status: "failed",
+        },
+      ],
+    };
+    const theme = createPilotTheme(capabilities);
+    const frame = new PilotScreen(() => state, theme, capabilities, "C:/workspace/pilot")
+      .render(100)
+      .join("\n");
+    expect(frame).toContain("$ pnpm test validation");
+    expect(frame).toContain("exit 2");
+  });
+
   it("renders read, search, command, edit, failed, cancelled, truncated, and unknown tools", () => {
     const tools: TerminalUiState["blocks"] = [
       ["read_file", "completed"],

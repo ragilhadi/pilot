@@ -112,7 +112,13 @@ export interface TerminalUiState {
 export type TerminalUiAction =
   | { readonly type: "chat.event"; readonly event: ChatEvent }
   | { readonly type: "composer.submitted"; readonly id: string; readonly text: string }
-  | { readonly type: "ui.toggle-tool-details" };
+  | { readonly type: "ui.toggle-tool-details" }
+  | {
+      readonly type: "ui.notice";
+      readonly id: string;
+      readonly tone: NoticeTranscriptBlock["tone"];
+      readonly text: string;
+    };
 
 export const initialTerminalUiState: TerminalUiState = Object.freeze({
   phase: "starting",
@@ -133,6 +139,20 @@ export function reduceTerminalUi(
 ): TerminalUiState {
   if (action.type === "ui.toggle-tool-details") {
     return { ...state, showToolDetails: !state.showToolDetails };
+  }
+  if (action.type === "ui.notice") {
+    return {
+      ...state,
+      blocks: [
+        ...state.blocks,
+        {
+          kind: "notice",
+          id: action.id,
+          tone: action.tone,
+          text: action.text,
+        } satisfies NoticeTranscriptBlock,
+      ],
+    };
   }
   if (action.type === "composer.submitted") {
     return {
