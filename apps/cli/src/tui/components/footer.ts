@@ -41,9 +41,11 @@ export class PilotFooter implements Component {
       );
     }
     const hints =
-      width >= 80
-        ? "Enter send  Ctrl+J newline  Esc cancel  Ctrl+C twice exit"
-        : "Enter send  Esc cancel";
+      width >= 100
+        ? "Enter send  Ctrl+J newline  Ctrl+Y copy  Esc cancel  Ctrl+C twice exit"
+        : width >= 80
+          ? "Enter send  Ctrl+J newline  Esc cancel  Ctrl+C twice exit"
+          : "Enter send  Esc cancel";
     return [
       this.#theme.muted("─".repeat(Math.max(1, width))),
       truncateToWidth(`${parts.join("  ")}  ${this.#theme.muted(hints)}`, width),

@@ -11,6 +11,8 @@ import type { PermissionApprovalRequest } from "@pilotrun/core";
 import type { ChatEvent } from "../chat-events.js";
 import type { InteractiveChatPresentation } from "../presentation/chat-presentation.js";
 import type { TerminalCapabilitySnapshot } from "../presentation/presentation-mode.js";
+import { copyToClipboard } from "./clipboard.js";
+import { type CodeBlock, extractCodeBlocks } from "./code-blocks.js";
 import { DismissableDialog, overlayOptions, SelectionDialog } from "./components/dialogs.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { PilotFooter } from "./components/footer.js";
@@ -74,6 +76,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   #permissionOverlayRequestId: string | undefined;
   #lastIdleInterruptAt = Number.NEGATIVE_INFINITY;
   #themeMode: PilotThemeMode;
+  #noticeSequence = 0;
 
   constructor(options: TerminalChatPresentationOptions) {
     this.#terminal = options.terminal;
@@ -102,6 +105,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
           { name: "context", description: "Inspect selected model context" },
           { name: "models", description: "Select the model for the next turn" },
           { name: "sessions", description: "Inspect resumable sessions" },
+          { name: "copy", description: "Copy a code block to the clipboard" },
           { name: "theme", description: "Switch terminal color theme" },
           { name: "abort", description: "Cancel the active turn" },
           { name: "exit", description: "End the chat session" },
@@ -170,6 +174,10 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#showSessionOverlay();
       return;
     }
+    if (text === "/copy") {
+      this.#showCopyOverlay();
+      return;
+    }
     this.#submissionSequence += 1;
     this.#state = reduceTerminalUi(this.#state, {
       type: "composer.submitted",
@@ -226,6 +234,16 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#showHistoryOverlay();
       return { consume: true };
     }
+    // Ctrl+Y copies a code block, but only when the composer is empty so the
+    // editor's emacs-style yank stays available while typing.
+    if (
+      matchesKey(data, Key.ctrl("y")) &&
+      this.#editor.getText().length === 0 &&
+      this.#collectCodeBlocks().length > 0
+    ) {
+      this.#showCopyOverlay();
+      return { consume: true };
+    }
     if (data === "?" && this.#editor.getText().length === 0) {
       this.#showHelpOverlay();
       return { consume: true };
@@ -242,6 +260,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "Tab          Accept command or file completion",
         "Esc          Close dialog or cancel active turn",
         "Ctrl+O       Toggle detailed tool output",
+        "Ctrl+Y       Copy a code block (empty composer)",
         "Ctrl+L       Redraw terminal",
         "Ctrl+C       Cancel, clear, then exit on second idle press",
         "Ctrl+D       Exit when the ready composer is empty",
@@ -249,6 +268,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "/context     Inspect model-facing context",
         "/models      Select the model used by the next turn",
         "/sessions    Inspect sessions and resume commands",
+        "/copy        Copy a code block to the clipboard",
         "/theme       Switch system/dark/light/high-contrast theme",
         "/abort       Cancel the active turn",
         "/exit        End the session",
@@ -341,6 +361,68 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#theme,
     );
     const handle = this.#tui.showOverlay(dialog, overlayOptions(48));
+    dialog.onClose = () => handle.hide();
+  }
+
+  /** Every code block across the transcript, most recent first. */
+  #collectCodeBlocks(): readonly CodeBlock[] {
+    const blocks: CodeBlock[] = [];
+    for (const block of this.#state.blocks) {
+      if (block.kind === "assistant") blocks.push(...extractCodeBlocks(block.text));
+    }
+    return blocks.reverse();
+  }
+
+  #notify(tone: "info" | "warning" | "danger" | "success", text: string): void {
+    this.#noticeSequence += 1;
+    this.#state = reduceTerminalUi(this.#state, {
+      type: "ui.notice",
+      id: `local-notice:${this.#noticeSequence}`,
+      tone,
+      text,
+    });
+    this.#tui.requestRender();
+  }
+
+  #copyCodeBlock(block: CodeBlock): void {
+    const copied = copyToClipboard(this.#terminal, block.code);
+    const lineCount = block.code.split("\n").length;
+    if (copied) {
+      this.#notify(
+        "success",
+        `Copied ${lineCount} line${lineCount === 1 ? "" : "s"}${block.lang === undefined ? "" : ` of ${block.lang}`} to the clipboard`,
+      );
+    } else {
+      this.#notify("warning", "Code block is too large to copy through the terminal clipboard");
+    }
+  }
+
+  #showCopyOverlay(): void {
+    const blocks = this.#collectCodeBlocks();
+    if (blocks.length === 1 && blocks[0] !== undefined) {
+      this.#copyCodeBlock(blocks[0]);
+      return;
+    }
+    const items = blocks.map((block, index) => {
+      const preview =
+        block.code
+          .split("\n")
+          .map((line) => line.trim())
+          .find((line) => line.length > 0) ?? "(empty)";
+      const lineCount = block.code.split("\n").length;
+      return {
+        value: String(index),
+        label: `${block.lang ?? "text"}  ${preview}`,
+        description: `${lineCount} line${lineCount === 1 ? "" : "s"}, copy to clipboard`,
+      };
+    });
+    const dialog = new SelectionDialog("Copy code block", items, this.#theme);
+    const handle = this.#tui.showOverlay(dialog, overlayOptions(48));
+    dialog.onSelect = (value) => {
+      handle.hide();
+      const block = blocks[Number(value)];
+      if (block !== undefined) this.#copyCodeBlock(block);
+    };
     dialog.onClose = () => handle.hide();
   }
 

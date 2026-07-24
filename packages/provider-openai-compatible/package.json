@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/provider-openai-compatible",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "OpenAI-compatible language model adapter for Pilot (Ollama, OpenAI, OpenRouter, and similar endpoints).",
   "license": "MIT",
   "publishConfig": {

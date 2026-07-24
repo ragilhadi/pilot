@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/agent-runtime",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Deterministic agent orchestration runtime for Pilot: state machine, budgets, context, permissions.",
   "license": "MIT",
   "publishConfig": {
