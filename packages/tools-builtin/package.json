@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/tools-builtin",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Built-in filesystem, patch, shell, and Git tools for the Pilot coding agent.",
   "license": "MIT",
   "publishConfig": {
