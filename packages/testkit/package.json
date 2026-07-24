@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/testkit",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Deterministic fakes (fake language model, scripted streams) for testing Pilot and its extensions.",
   "license": "MIT",
   "publishConfig": {
