@@ -36,9 +36,10 @@ export function createWriteFileTool(
   journal: ChangeJournal,
 ): ToolDefinition<typeof WriteFileInputSchema, typeof WriteFileOutputSchema> {
   return defineTool({
-    name: "write_file",
+    name: "create_file",
     description:
-      "Create one new UTF-8 workspace file with the given content. Fails if the file already exists; use apply_patch to modify an existing file.",
+      "Create one new UTF-8 workspace file with the given content. This tool only creates files; " +
+      "it fails if the file already exists. To modify an existing file, use apply_patch instead.",
     inputSchema: WriteFileInputSchema,
     outputSchema: WriteFileOutputSchema,
     metadata: {

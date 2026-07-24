@@ -4,7 +4,6 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
 
 permissions:
   contents: read
@@ -47,7 +46,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check formatting, lint, and types
+      - name: Check formatting, lint, types, and version sync
         run: pnpm check
 
       - name: Run tests

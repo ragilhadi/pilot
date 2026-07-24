@@ -37,7 +37,7 @@ class MemoryWorkspaceFileSystem implements WorkspaceFileSystem {
       throw new PilotError({
         code: "PILOT_WORKSPACE_FILE_EXISTS",
         message: `Existing memory file ${input.path}`,
-        safeMessage: "write_file only creates new files.",
+        safeMessage: "create_file only creates new files.",
       });
     }
     this.files.set(input.path, input.content);
