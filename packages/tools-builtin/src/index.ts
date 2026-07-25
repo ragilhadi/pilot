@@ -147,6 +147,17 @@ export {
   type TodoWriteInput,
 } from "./todo-tools.js";
 export {
+  createWebFetchTool,
+  WebFetchInputSchema,
+  WebFetchOutputSchema,
+  WebFetchToolError,
+  type FetchLike,
+  type HostResolver,
+  type WebFetchInput,
+  type WebFetchOutput,
+  type WebFetchToolOptions,
+} from "./web-fetch-tool.js";
+export {
   classifyCommandRisk,
   type CommandIntent,
   type CommandRiskClassification,

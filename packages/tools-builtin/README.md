@@ -6,9 +6,15 @@ agent uses to inspect and change a repository — each one boundary-checked, san
 workspace, and permission-gated.
 
 Included tools: `list_files`, `glob`, `grep`, `read_file`, `apply_patch`, `edit`, `create_file`,
-`run_command`, `git_status`, `git_diff`, `todo_write`, and `todo_read`. All reads and writes
-resolve through a workspace boundary (real-path containment, symlink-escape prevention) before
-touching the filesystem.
+`run_command`, `git_status`, `git_diff`, `todo_write`, `todo_read`, and `web_fetch`. All reads and
+writes resolve through a workspace boundary (real-path containment, symlink-escape prevention)
+before touching the filesystem.
+
+`web_fetch` retrieves a single http(s) URL and returns bounded, sanitized text (HTML is reduced to
+readable text). It is a network-risk, permission-gated tool with SSRF protection: only http(s) is
+allowed, embedded credentials are refused, and hosts that resolve to private, loopback, or
+link-local addresses (including cloud metadata endpoints) are blocked — re-checked on every
+redirect hop.
 
 `todo_write`/`todo_read` maintain a structured, in-session task list so the agent can plan and
 track progress across multi-step work. They mutate only in-session state (no workspace, network,
