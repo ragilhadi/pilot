@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   createWriteFileTool,
   InMemoryChangeJournal,
+  type AtomicReplaceInput,
+  type AtomicReplaceResult,
   type CreateFileInput,
   type CreateFileResult,
   type WorkspaceFileSnapshot,
@@ -28,8 +30,20 @@ class MemoryWorkspaceFileSystem implements WorkspaceFileSystem {
     };
   }
 
-  async replaceUtf8Atomic(): Promise<never> {
-    throw new Error("not used in write_file tests");
+  async replaceUtf8Atomic(input: AtomicReplaceInput): Promise<AtomicReplaceResult> {
+    const current = this.files.get(input.path);
+    if (current === undefined) throw new Error(`Missing ${input.path}`);
+    const beforeSha256 = sha256(current);
+    if (beforeSha256 !== input.expectedSha256) {
+      throw new PilotError({ code: "PILOT_PATCH_BASE_MISMATCH", message: "Stale memory file" });
+    }
+    this.files.set(input.path, input.content);
+    return {
+      path: input.path,
+      beforeSha256,
+      afterSha256: sha256(input.content),
+      sizeBytes: Buffer.byteLength(input.content),
+    };
   }
 
   async createUtf8(input: CreateFileInput): Promise<CreateFileResult> {
@@ -108,6 +122,57 @@ describe("write_file tool", () => {
       tool.execute({ path: "exists.ts", content: "new\n" }, context("run-x", "call-x")),
     ).rejects.toMatchObject({ code: "PILOT_WORKSPACE_FILE_EXISTS" });
     expect(fileSystem.files.get("exists.ts")).toBe("original\n");
+  });
+
+  it("overwrites an existing file when the correct baseSha256 is supplied", async () => {
+    const fileSystem = new MemoryWorkspaceFileSystem();
+    const original = "old line\n";
+    fileSystem.files.set("exists.ts", original);
+    const journal = new InMemoryChangeJournal(clock);
+    const tool = createWriteFileTool(fileSystem, journal);
+    const content = "new line one\nnew line two\n";
+
+    const result = await tool.execute(
+      { path: "exists.ts", content, baseSha256: sha256(original) },
+      context("run-ow", "call-ow"),
+    );
+
+    expect(fileSystem.files.get("exists.ts")).toBe(content);
+    expect(result.output).toMatchObject({
+      path: "exists.ts",
+      sha256: sha256(content),
+      lineCount: 3,
+      created: false,
+      journalSequence: 1,
+    });
+    expect(result.metadata).toMatchObject({ changed: true, created: false });
+    expect(journal.entries(runId("run-ow"))).toMatchObject([
+      {
+        sequence: 1,
+        operation: "apply",
+        path: "exists.ts",
+        beforeSha256: sha256(original),
+        afterSha256: sha256(content),
+        additions: 3,
+        deletions: 2,
+      },
+    ]);
+  });
+
+  it("refuses to overwrite when the baseSha256 is stale", async () => {
+    const fileSystem = new MemoryWorkspaceFileSystem();
+    fileSystem.files.set("exists.ts", "current\n");
+    const journal = new InMemoryChangeJournal(clock);
+    const tool = createWriteFileTool(fileSystem, journal);
+
+    await expect(
+      tool.execute(
+        { path: "exists.ts", content: "next\n", baseSha256: sha256("stale\n") },
+        context("run-stale", "call-stale"),
+      ),
+    ).rejects.toMatchObject({ code: "PILOT_PATCH_BASE_MISMATCH" });
+    expect(fileSystem.files.get("exists.ts")).toBe("current\n");
+    expect(journal.entries()).toEqual([]);
   });
 
   it("rejects model-facing input that violates the schema", async () => {

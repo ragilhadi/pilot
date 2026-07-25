@@ -40,6 +40,7 @@ import {
 import {
   createApplyPatchTool,
   createBuiltinFileListTools,
+  createEditFileTool,
   createGrepTool,
   createGitTools,
   createReadFileTool,
@@ -792,6 +793,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       createGrepTool(boundary),
       createReadFileTool(boundary),
       createApplyPatchTool(workspaceFileSystem, changeJournal),
+      createEditFileTool(workspaceFileSystem, changeJournal),
       createWriteFileTool(workspaceFileSystem, changeJournal),
       createRunCommandTool(boundary, {
         environment: process.env,
