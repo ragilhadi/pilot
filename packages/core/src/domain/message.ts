@@ -10,27 +10,11 @@ import {
   type RunId,
   type SessionId,
   type ToolCallId,
-} from "./brand.js";
-import { MessageValidationError } from "./errors.js";
-
-export const messageSchemaVersion = 1 as const;
-
-export type JsonPrimitive = boolean | null | number | string;
-export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
-export interface JsonObject {
-  readonly [key: string]: JsonValue;
-}
-
-export const JsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-  z.union([
-    z.string(),
-    z.number().finite(),
-    z.boolean(),
-    z.null(),
-    z.array(JsonValueSchema).readonly(),
-    z.record(z.string(), JsonValueSchema).readonly(),
-  ]),
-);
+} from "../shared/brand.js";
+import { JsonObjectSchema, JsonValueSchema } from "../shared/json.js";
+import { httpOrHttpsUrl, toolNameSchema } from "../shared/schema-fragments.js";
+import { messageSchemaVersion } from "../constants.js";
+import { MessageValidationError } from "../errors/pilot-error.js";
 
 const nonEmptyIdentifier = z.string().refine((value) => value.trim().length > 0, {
   error: "Identifier must not be empty",
@@ -41,12 +25,6 @@ export const MessageIdSchema: z.ZodType<MessageId> = nonEmptyIdentifier.transfor
 export const RunIdSchema: z.ZodType<RunId> = nonEmptyIdentifier.transform(runId);
 export const SessionIdSchema: z.ZodType<SessionId> = nonEmptyIdentifier.transform(sessionId);
 export const ToolCallIdSchema: z.ZodType<ToolCallId> = nonEmptyIdentifier.transform(toolCallId);
-
-const toolNameSchema = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z][a-z0-9_]*$/u, "Tool names must use lowercase snake_case");
 
 export const TextPartSchema = z
   .object({
@@ -67,10 +45,7 @@ const ImageSourceSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("url"),
-      url: z.url().refine((value) => {
-        const protocol = new URL(value).protocol;
-        return protocol === "http:" || protocol === "https:";
-      }, "Image URLs must use HTTP or HTTPS"),
+      url: httpOrHttpsUrl("Image URLs must use HTTP or HTTPS"),
     })
     .strict()
     .readonly(),
@@ -191,8 +166,6 @@ const allowedProvenanceByRole = {
   tool: new Set(["tool"]),
   user: new Set(["user"]),
 } as const;
-
-const JsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), JsonValueSchema).readonly();
 
 export const AgentMessageSchema = z
   .object({

@@ -1,5 +1,5 @@
 import * as z from "zod";
-import { PilotError, type PilotErrorCode } from "./errors.js";
+import { PilotError, type PilotErrorCode } from "./pilot-error.js";
 
 export const ModelFailureKindSchema = z.enum([
   "authentication",

@@ -1,6 +1,7 @@
 import * as z from "zod";
-import { ToolRiskSchema } from "./tools.js";
-import { JsonValueSchema } from "./messages.js";
+import { ToolRiskSchema } from "./tool.js";
+import { JsonValueSchema } from "../shared/json.js";
+import { boundedIdentifier, toolNameSchema as toolName } from "../shared/schema-fragments.js";
 
 export const PermissionEffectSchema = z.enum(["allow", "deny", "ask"]);
 export const PermissionRuleSourceSchema = z.enum([
@@ -12,13 +13,6 @@ export const PermissionRuleSourceSchema = z.enum([
   "interactive",
 ]);
 export const ActionFingerprintSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/u);
-
-const boundedIdentifier = z.string().min(1).max(256);
-const toolName = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z][a-z0-9_]*$/u);
 
 export const ToolPermissionActionSchema = z
   .object({

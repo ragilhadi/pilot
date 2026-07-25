@@ -1,4 +1,11 @@
 export {
+  configurationSchemaVersion,
+  eventSchemaVersion,
+  maximumConfigurationBytes,
+  messageSchemaVersion,
+  sessionSchemaVersion,
+} from "./constants.js";
+export {
   agentId,
   correlationId,
   eventId,
@@ -14,27 +21,13 @@ export {
   type RunId,
   type SessionId,
   type ToolCallId,
-} from "./brand.js";
+} from "./shared/brand.js";
 export {
-  builtinConfiguration,
-  ConfigurationError,
-  type ConfigurationLayer,
-  type ConfigurationLayerSource,
-  ConfigurationLayerValueSchema,
-  type ConfigurationLayerValue,
-  type ConfigurationProvenance,
-  configurationSchemaVersion,
-  type EffectiveConfiguration,
-  type EnvironmentReference,
-  EnvironmentReferenceSchema,
-  maximumConfigurationBytes,
-  MissingConfigurationEnvironmentError,
-  parseJsonConfiguration,
-  type PilotConfiguration,
-  PilotConfigurationSchema,
-  resolveConfiguration,
-  resolveEnvironmentReference,
-} from "./configuration.js";
+  type JsonObject,
+  type JsonPrimitive,
+  type JsonValue,
+  JsonValueSchema,
+} from "./shared/json.js";
 export {
   CancellationError,
   EventDeliveryError,
@@ -45,24 +38,55 @@ export {
   type PilotErrorCode,
   type PilotErrorOptions,
   type SafeErrorSnapshot,
-} from "./errors.js";
+} from "./errors/pilot-error.js";
 export {
-  type AppEvent,
-  type AppStartedEvent,
-  type EventEnvelope,
-  type EventPublisher,
-  type EventSubscriber,
-  eventSchemaVersion,
-} from "./events.js";
+  ModelContractValidationError,
+  ModelError,
+  ModelFailureKindSchema,
+  ModelFailureSchema,
+  type ModelErrorOptions,
+  type ModelFailure,
+  type ModelFailureKind,
+} from "./errors/model-error.js";
+export { SessionError, type SessionErrorReason } from "./errors/session-error.js";
+export type { Clock, IdSource } from "./entity/ports.js";
+export type { WorkspaceAccess, WorkspaceBoundary, WorkspacePath } from "./entity/workspace.js";
+export type {
+  AppEvent,
+  AppStartedEvent,
+  EventEnvelope,
+  EventPublisher,
+  EventSubscriber,
+} from "./entity/event.js";
+export type {
+  AppendMessageOptions,
+  CheckpointRepository,
+  ModelCallRepository,
+  NewSession,
+  PersistedActivityStatus,
+  PersistedCheckpoint,
+  PersistedModelCall,
+  PersistedRun,
+  PersistedRunStatus,
+  PersistedToolCall,
+  PersistedToolCallStatus,
+  PersistedToolResult,
+  PersistedUsageRecord,
+  PermissionAuditRepository,
+  PersistenceRepositories,
+  RunRepository,
+  SessionRepository,
+  SessionSnapshot,
+  ToolActivityRepository,
+  UsageRepository,
+} from "./entity/persistence.js";
 export {
   AgentIdSchema,
   AgentMessageSchema,
   ImagePartSchema,
-  JsonValueSchema,
   MessageIdSchema,
   MessagePartSchema,
   MessageProvenanceSchema,
-  messageSchemaVersion,
   parseAgentMessage,
   RedactedPartSchema,
   RunIdSchema,
@@ -73,25 +97,13 @@ export {
   ToolResultPartSchema,
   type AgentMessage,
   type ImagePart,
-  type JsonObject,
-  type JsonPrimitive,
-  type JsonValue,
   type MessagePart,
   type MessageProvenance,
   type RedactedPart,
   type TextPart,
   type ToolCallPart,
   type ToolResultPart,
-} from "./messages.js";
-export {
-  ModelContractValidationError,
-  ModelError,
-  ModelFailureKindSchema,
-  ModelFailureSchema,
-  type ModelErrorOptions,
-  type ModelFailure,
-  type ModelFailureKind,
-} from "./model-errors.js";
+} from "./domain/message.js";
 export {
   ModelCapabilitiesSchema,
   ModelDescriptorSchema,
@@ -100,6 +112,8 @@ export {
   ModelResponseSchema,
   ModelStreamEventSchema,
   ModelToolDefinitionSchema,
+  parseModelCapabilities,
+  parseModelDescriptor,
   parseModelKey,
   parseModelRequest,
   parseModelStreamEvent,
@@ -118,41 +132,12 @@ export {
   type ModelResponse,
   type ModelStreamEvent,
   type ModelToolDefinition,
-  parseModelCapabilities,
-  parseModelDescriptor,
   type ParsedModelKey,
   type ProviderAuth,
   type ProviderConfiguration,
   type RetryPolicy,
   type TokenUsage,
-} from "./models.js";
-export type { Clock, IdSource } from "./ports.js";
-export {
-  type AppendMessageOptions,
-  type CheckpointRepository,
-  type ModelCallRepository,
-  type NewSession,
-  type PersistedActivityStatus,
-  type PersistedCheckpoint,
-  type PersistedModelCall,
-  type PersistedRun,
-  type PersistedRunStatus,
-  type PersistedToolCall,
-  type PersistedToolCallStatus,
-  type PersistedToolResult,
-  type PersistedUsageRecord,
-  type PermissionAuditRepository,
-  type PersistenceRepositories,
-  type RunRepository,
-  sessionSchemaVersion,
-  SessionError,
-  type SessionErrorReason,
-  type SessionRepository,
-  type SessionSnapshot,
-  type ToolActivityRepository,
-  type UsageRepository,
-} from "./persistence.js";
-export { ToolRecoverySchema, type ToolRecovery } from "./recovery.js";
+} from "./domain/model.js";
 export {
   ActionFingerprintSchema,
   CommandPermissionActionSchema,
@@ -185,7 +170,7 @@ export {
   type PermissionScope,
   type ToolPermissionAction,
   type UserInteraction,
-} from "./permissions.js";
+} from "./domain/permission.js";
 export {
   defineTool,
   parseToolInput,
@@ -203,5 +188,23 @@ export {
   type ToolMetadata,
   type ToolRisk,
   type ToolSchemaOutput,
-} from "./tools.js";
-export type { WorkspaceAccess, WorkspaceBoundary, WorkspacePath } from "./workspace.js";
+} from "./domain/tool.js";
+export { ToolRecoverySchema, type ToolRecovery } from "./domain/recovery.js";
+export {
+  builtinConfiguration,
+  ConfigurationError,
+  type ConfigurationLayer,
+  type ConfigurationLayerSource,
+  ConfigurationLayerValueSchema,
+  type ConfigurationLayerValue,
+  type ConfigurationProvenance,
+  type EffectiveConfiguration,
+  type EnvironmentReference,
+  EnvironmentReferenceSchema,
+  MissingConfigurationEnvironmentError,
+  parseJsonConfiguration,
+  type PilotConfiguration,
+  PilotConfigurationSchema,
+  resolveConfiguration,
+  resolveEnvironmentReference,
+} from "./domain/configuration.js";
