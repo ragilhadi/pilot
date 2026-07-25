@@ -45,8 +45,10 @@ import {
   createGitTools,
   createReadFileTool,
   createRunCommandTool,
+  createTodoTools,
   createWriteFileTool,
   InMemoryChangeJournal,
+  InMemoryTodoStore,
   NodeWorkspaceFileSystem,
   NodeWorkspaceBoundary,
   type GitCommandRunner,
@@ -783,6 +785,8 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   );
   const changeJournal = new InMemoryChangeJournal(dependencies.clock);
   const workspaceFileSystem = new NodeWorkspaceFileSystem(boundary);
+  const todoStore = new InMemoryTodoStore();
+  const todoTools = createTodoTools(todoStore);
   const tools =
     dependencies.tools ??
     new ToolRegistry([
@@ -795,6 +799,8 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       createApplyPatchTool(workspaceFileSystem, changeJournal),
       createEditFileTool(workspaceFileSystem, changeJournal),
       createWriteFileTool(workspaceFileSystem, changeJournal),
+      todoTools.todoWrite,
+      todoTools.todoRead,
       createRunCommandTool(boundary, {
         environment: process.env,
         onOutput: (event, context) => {
