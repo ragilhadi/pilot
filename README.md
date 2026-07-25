@@ -55,9 +55,26 @@ pilot chat
 ```
 
 Override the local endpoint with `PILOT_OLLAMA_BASE_URL` if your daemon listens elsewhere.
-Additional OpenAI-compatible models can be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON`
-(a JSON array of `{ provider, modelId, displayName, capabilities }` entries; credentials must be
-environment-variable references, never raw keys).
+
+### Adding models
+
+Pull a model in Ollama, then register it with Pilot so it persists across sessions:
+
+```sh
+ollama pull deepseek-v4-flash:cloud
+pilot models add deepseek-v4-flash:cloud
+pilot chat --model ollama/deepseek-v4-flash:cloud
+```
+
+`pilot models add` saves the model to `<data-dir>/models.json` (default `~/.pilot/models.json`),
+so it shows up in `pilot models` and is selectable from then on — no environment variables needed.
+Flags: `--provider` (default `ollama`), `--name`, `--base-url`, `--no-tools` (for models without
+tool-calling), and `--vision`. Remove one with `pilot models remove <model-id>`.
+
+For advanced setups (custom providers, credential references), additional OpenAI-compatible models
+can also be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON` (a JSON array of
+`{ provider, modelId, displayName, capabilities }` entries; credentials must be environment-variable
+references, never raw keys).
 
 In an interactive terminal, `chat` uses a full-screen TUI automatically (multiline editor,
 history, `/` and `@` completion, streaming Markdown, permission prompts). Force a mode

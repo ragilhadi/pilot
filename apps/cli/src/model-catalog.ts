@@ -7,17 +7,23 @@ import {
 import { type Fetch, OpenAICompatibleLanguageModel } from "@pilotrun/provider-openai-compatible";
 import { FakeLanguageModel, textResponseScript } from "@pilotrun/testkit";
 import * as z from "zod";
+import { type PersistedModel, persistedModelKey } from "./model-store.js";
 
 export const compatibleModelsEnvironmentVariable = "PILOT_OPENAI_COMPATIBLE_MODELS_JSON" as const;
 export const ollamaBaseUrlEnvironmentVariable = "PILOT_OLLAMA_BASE_URL" as const;
 export const defaultCliModelKey = "ollama/glm-5.2:cloud" as const;
 export const defaultOllamaBaseUrl = "http://localhost:11434/v1" as const;
 
+/** Keys of the models that always exist and cannot be overridden by user config. */
+export const builtinModelKeys = ["ollama/glm-5.2:cloud", "fake/test"] as const;
+
 export type CliEnvironment = Readonly<Record<string, string | undefined>>;
 
 export interface ModelCatalogDependencies {
   readonly environment: CliEnvironment;
   readonly fetch?: Fetch;
+  /** User-added models loaded from the models store; registered after builtins. */
+  readonly persistedModels?: readonly PersistedModel[];
 }
 
 export interface ProviderCredentialStatus {
@@ -89,6 +95,34 @@ export function createModelCatalog(dependencies: ModelCatalogDependencies): Mode
     },
   ]);
 
+  for (const persisted of dependencies.persistedModels ?? []) {
+    const key = persistedModelKey(persisted);
+    // A user-added model must never shadow a builtin or an already-registered
+    // model; skip silently so `models add` of a known key is a harmless no-op.
+    if (registry.has(key)) {
+      continue;
+    }
+    registry.register({
+      model: new OpenAICompatibleLanguageModel({
+        configuration: ProviderConfigurationSchema.parse({
+          providerId: persisted.provider,
+          type: "openai-compatible",
+          baseUrl:
+            persisted.baseUrl ??
+            dependencies.environment[ollamaBaseUrlEnvironmentVariable] ??
+            defaultOllamaBaseUrl,
+          auth: { type: "none" },
+        }),
+        modelId: persisted.modelId,
+        capabilities: persistedModelCapabilities(persisted),
+        ...(dependencies.fetch === undefined ? {} : { fetch: dependencies.fetch }),
+        readEnvironment: (variable) => dependencies.environment[variable],
+      }),
+      displayName: persisted.displayName ?? persisted.modelId,
+      metadata: { source: "store" },
+    });
+  }
+
   const serialized = dependencies.environment[compatibleModelsEnvironmentVariable];
   if (serialized === undefined || serialized.trim().length === 0) {
     return registry;
@@ -130,6 +164,20 @@ export function inspectProviderCredentials(
     });
   }
   return Object.freeze([...statuses.values()]);
+}
+
+function persistedModelCapabilities(model: PersistedModel) {
+  return ModelCapabilitiesSchema.parse({
+    streaming: true,
+    nativeToolCalling: model.tools,
+    parallelToolCalls: false,
+    structuredOutput: true,
+    vision: model.vision,
+    promptCaching: false,
+    reasoning: false,
+    configurableReasoningEffort: false,
+    systemMessages: true,
+  });
 }
 
 function parseConfiguredModels(serialized: string) {
