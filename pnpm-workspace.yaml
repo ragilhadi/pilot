@@ -16,4 +16,5 @@ syncInjectedDepsAfterScripts:
   - build
 
 allowBuilds:
+  '@vscode/ripgrep': true
   node-pty: true

@@ -13,6 +13,10 @@ The write surface offers three complementary primitives, all SHA-256-guarded and
 `create_file` (create a new file, or overwrite an existing one when its `baseSha256` is supplied),
 `edit` (replace an exact, unique string), and `apply_patch` (apply a unified diff).
 
+`grep` uses ripgrep, bundled via [`@vscode/ripgrep`](https://www.npmjs.com/package/@vscode/ripgrep),
+so search works with no external setup on Windows, macOS, and Linux (falling back to `rg` on the
+`PATH` only if the bundled binary cannot be located).
+
 ## Install
 
 ```sh

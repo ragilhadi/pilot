@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import {
@@ -109,10 +111,34 @@ export class GrepToolError extends PilotError {
   }
 }
 
+let cachedRipgrepPath: string | undefined;
+
+/**
+ * Resolve the ripgrep executable. Prefers the ripgrep binary bundled with the
+ * `@vscode/ripgrep` dependency (so search works with zero user setup on every
+ * platform) and falls back to `rg` on the PATH only when the bundled binary
+ * cannot be located.
+ */
+export function resolveRipgrepPath(): string {
+  cachedRipgrepPath ??= loadBundledRipgrepPath() ?? "rg";
+  return cachedRipgrepPath;
+}
+
+function loadBundledRipgrepPath(): string | undefined {
+  try {
+    const requireFrom = createRequire(import.meta.url);
+    const module = requireFrom("@vscode/ripgrep") as { readonly rgPath?: unknown };
+    const rgPath = typeof module.rgPath === "string" ? module.rgPath : undefined;
+    return rgPath !== undefined && existsSync(rgPath) ? rgPath : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class NodeRipgrepRunner implements RipgrepRunner {
   readonly #executable: string;
 
-  constructor(executable = "rg") {
+  constructor(executable = resolveRipgrepPath()) {
     this.#executable = executable;
   }
 

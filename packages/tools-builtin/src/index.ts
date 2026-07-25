@@ -53,6 +53,7 @@ export {
   GrepOutputSchema,
   GrepToolError,
   NodeRipgrepRunner,
+  resolveRipgrepPath,
   type GrepInput,
   type GrepMatch,
   type GrepOutput,

@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@pilotrun/core": "workspace:*",
+    "@vscode/ripgrep": "^1.18.0",
     "zod": "catalog:"
   }
 }

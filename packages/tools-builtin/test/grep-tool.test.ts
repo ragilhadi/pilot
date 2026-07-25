@@ -17,19 +17,20 @@ import {
   GrepToolError,
   NodeRipgrepRunner,
   NodeWorkspaceBoundary,
+  resolveRipgrepPath,
   type RipgrepRunner,
   type RipgrepRunRequest,
   type RipgrepRunResult,
 } from "../src/index.js";
 
 /**
- * The end-to-end case shells out to a real `rg`. When ripgrep is not installed
- * it is skipped with a clear reason instead of failing with an opaque diff. CI
- * installs ripgrep explicitly so this case always runs there.
+ * The end-to-end case shells out to the real ripgrep the tool would use — the
+ * binary bundled with `@vscode/ripgrep`, falling back to `rg` on the PATH. If
+ * neither resolves it is skipped with a clear reason instead of an opaque diff.
  */
 const hasRipgrep = (() => {
   try {
-    return spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0;
+    return spawnSync(resolveRipgrepPath(), ["--version"], { stdio: "ignore" }).status === 0;
   } catch {
     return false;
   }
