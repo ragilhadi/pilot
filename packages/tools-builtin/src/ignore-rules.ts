@@ -207,5 +207,7 @@ function normalizePath(value: string): string {
 }
 
 function escapeRegex(value: string): string {
-  return value.replace(/[|\\{}()[\]^$+?.-]/gu, "\\$&");
+  // A literal "-" only carries meaning inside a character class; escaping it here
+  // yields "\-", which is an illegal identity escape under the RegExp "u" flag.
+  return value.replace(/[|\\{}()[\]^$+?.]/gu, "\\$&");
 }

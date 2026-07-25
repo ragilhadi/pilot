@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/persistence-sqlite",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "SQLite-backed session, run, and checkpoint persistence for Pilot.",
   "license": "MIT",
   "publishConfig": {
