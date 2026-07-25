@@ -31,6 +31,7 @@ import {
   SessionError,
   sessionId,
   toSafeErrorSnapshot,
+  type WorkspaceBoundary,
 } from "@pilotrun/core";
 import {
   diagnoseSqliteDatabase,
@@ -52,12 +53,29 @@ import {
   InMemoryTodoStore,
   NodeWorkspaceFileSystem,
   NodeWorkspaceBoundary,
+  resolveContextMentions,
+  type ContextMentionResolution,
   type GitCommandRunner,
 } from "@pilotrun/tools-builtin";
-import { ChatEventFactory, ChatEventRenderer } from "./chat-events.js";
+import {
+  ChatEventFactory,
+  ChatEventRenderer,
+  formatContextAttachmentSummary,
+} from "./chat-events.js";
 import { CliUserInteraction } from "./cli-user-interaction.js";
 import { type PilotDoctor, renderDoctorReport } from "./diagnostics.js";
-import { defaultCliModelKey } from "./model-catalog.js";
+import { builtinModelKeys, defaultCliModelKey } from "./model-catalog.js";
+import {
+  ModelStoreError,
+  modelsStorePath,
+  type PersistedModelInput,
+  PersistedModelSchema,
+  persistedModelKey,
+  readPersistedModels,
+  removePersistedModel,
+  upsertPersistedModel,
+  writePersistedModels,
+} from "./model-store.js";
 import type { ChatEventSink } from "./presentation/chat-presentation.js";
 import { isPresentationMode, type PresentationMode } from "./presentation/presentation-mode.js";
 import type { StructuredLogger } from "./structured-logger.js";
@@ -80,6 +98,7 @@ export interface CliDependencies {
   readonly stdin?: LineReader;
   readonly monotonicNow?: () => number;
   readonly workspacePath?: string;
+  readonly dataDirectory?: string;
   readonly tools?: ToolRegistry;
   readonly gitRunner?: GitCommandRunner;
   readonly persistence?: {
@@ -98,6 +117,10 @@ export interface CliDependencies {
 interface ModelsCommand {
   readonly type: "models";
   readonly json: boolean;
+  readonly action:
+    | { readonly kind: "list" }
+    | { readonly kind: "add"; readonly entry: PersistedModelInput }
+    | { readonly kind: "remove"; readonly key: string };
 }
 
 interface ConfigCommand {
@@ -164,6 +187,8 @@ class CliUsageError extends Error {}
 const usage = `Usage:
   pilot doctor [--json]
   pilot models [--json]
+  pilot models add MODEL_ID [--provider P] [--name NAME] [--base-url URL] [--no-tools] [--vision]
+  pilot models remove MODEL_ID [--provider P]
   pilot config [--json]
   pilot instructions [--json] [FILE ...] [--directory DIR]
   pilot run [--model provider/model] [--json] "prompt"
@@ -206,8 +231,7 @@ export async function runCli(
         exitCode = await executeDoctor(command, dependencies);
         break;
       case "models":
-        renderModels(dependencies.registry, command.json, dependencies.stdout);
-        exitCode = 0;
+        exitCode = await executeModels(command, dependencies);
         break;
       case "config":
         renderConfiguration(dependencies.configuration, command.json, dependencies.stdout);
@@ -254,13 +278,7 @@ function parseCommand(args: readonly string[], defaultModelKey: string): CliComm
     throw new CliUsageError("doctor accepts only the optional --json flag");
   }
   if (name === "models") {
-    if (rest.length === 0) {
-      return Object.freeze({ type: "models", json: false });
-    }
-    if (rest.length === 1 && rest[0] === "--json") {
-      return Object.freeze({ type: "models", json: true });
-    }
-    throw new CliUsageError("models accepts only the optional --json flag");
+    return parseModelsCommand(rest);
   }
   if (name === "config") {
     if (rest.length === 0 || (rest.length === 1 && rest[0] === "--json")) {
@@ -388,6 +406,118 @@ export function remediationForError(code: string): string {
     return "Run pilot doctor in the intended repository and verify workspace and Git access.";
   }
   return "Run pilot doctor --json for environment checks and retry after correcting failed checks.";
+}
+
+function parseModelsCommand(args: readonly string[]): ModelsCommand {
+  const [subcommand, ...rest] = args;
+  if (subcommand === undefined || subcommand === "--json") {
+    if (rest.length > 0) throw new CliUsageError("models accepts only the optional --json flag");
+    return Object.freeze({
+      type: "models",
+      json: subcommand === "--json",
+      action: { kind: "list" as const },
+    });
+  }
+  if (subcommand === "add") return parseModelsAddCommand(rest);
+  if (subcommand === "remove") return parseModelsRemoveCommand(rest);
+  if (subcommand.startsWith("--")) throw new CliUsageError(`unknown option ${subcommand}`);
+  throw new CliUsageError(`unknown models subcommand ${subcommand}`);
+}
+
+function parseModelsAddCommand(args: readonly string[]): ModelsCommand {
+  let modelId: string | undefined;
+  let provider = "ollama";
+  let displayName: string | undefined;
+  let baseUrl: string | undefined;
+  let tools = true;
+  let vision = false;
+  let json = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === undefined) continue;
+    const optionValue = (label: string): string => {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new CliUsageError(`${label} requires a value`);
+      }
+      index += 1;
+      return value;
+    };
+    switch (argument) {
+      case "--provider":
+        provider = optionValue("--provider");
+        break;
+      case "--name":
+        displayName = optionValue("--name");
+        break;
+      case "--base-url":
+        baseUrl = optionValue("--base-url");
+        break;
+      case "--no-tools":
+        tools = false;
+        break;
+      case "--vision":
+        vision = true;
+        break;
+      case "--json":
+        json = true;
+        break;
+      default:
+        if (argument.startsWith("--")) throw new CliUsageError(`unknown option ${argument}`);
+        if (modelId !== undefined) throw new CliUsageError("models add accepts a single model id");
+        modelId = argument;
+    }
+  }
+  if (modelId === undefined) {
+    throw new CliUsageError('models add requires a model id, e.g. models add "llama3.1:8b"');
+  }
+  return Object.freeze({
+    type: "models",
+    json,
+    action: {
+      kind: "add" as const,
+      entry: {
+        provider,
+        modelId,
+        tools,
+        vision,
+        ...(displayName === undefined ? {} : { displayName }),
+        ...(baseUrl === undefined ? {} : { baseUrl }),
+      },
+    },
+  });
+}
+
+function parseModelsRemoveCommand(args: readonly string[]): ModelsCommand {
+  let target: string | undefined;
+  let provider = "ollama";
+  let json = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument === "--provider") {
+      const value = args[index + 1];
+      if (value === undefined || value.startsWith("--")) {
+        throw new CliUsageError("--provider requires a value");
+      }
+      provider = value;
+      index += 1;
+      continue;
+    }
+    if (argument?.startsWith("--")) throw new CliUsageError(`unknown option ${argument}`);
+    if (argument !== undefined) {
+      if (target !== undefined) throw new CliUsageError("models remove accepts a single model");
+      target = argument;
+    }
+  }
+  if (target === undefined) {
+    throw new CliUsageError("models remove requires a model id or provider/model key");
+  }
+  const key = target.includes("/") ? target : `${provider}/${target}`;
+  return Object.freeze({ type: "models", json, action: { kind: "remove" as const, key } });
 }
 
 function parseInstructionsCommand(args: readonly string[]): InstructionsCommand {
@@ -641,6 +771,89 @@ function renderSession(snapshot: {
     .join("\n")}\n`;
 }
 
+async function executeModels(
+  command: ModelsCommand,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if (command.action.kind === "list") {
+    renderModels(dependencies.registry, command.json, dependencies.stdout);
+    return 0;
+  }
+  if (dependencies.dataDirectory === undefined) {
+    dependencies.stderr.write("Cannot modify models: no data directory is available.\n");
+    return 1;
+  }
+  const storePath = modelsStorePath(dependencies.dataDirectory);
+  try {
+    const existing = await readPersistedModels(storePath);
+    if (command.action.kind === "add") {
+      return await addModel(command, command.action.entry, existing, storePath, dependencies);
+    }
+    return await removeModel(command, command.action.key, existing, storePath, dependencies);
+  } catch (error) {
+    if (error instanceof ModelStoreError) {
+      dependencies.stderr.write(`${error.message}\n`);
+      return 1;
+    }
+    throw error;
+  }
+}
+
+async function addModel(
+  command: ModelsCommand,
+  input: PersistedModelInput,
+  existing: Awaited<ReturnType<typeof readPersistedModels>>,
+  storePath: string,
+  dependencies: CliDependencies,
+): Promise<number> {
+  const entry = PersistedModelSchema.parse(input);
+  const key = persistedModelKey(entry);
+  if ((builtinModelKeys as readonly string[]).includes(key)) {
+    dependencies.stderr.write(`${key} is a built-in model and cannot be overridden.\n`);
+    return 1;
+  }
+  const { models, replaced } = upsertPersistedModel(existing, entry);
+  await writePersistedModels(storePath, models);
+  if (command.json) {
+    dependencies.stdout.write(
+      `${JSON.stringify({ action: replaced ? "updated" : "added", key, model: entry })}\n`,
+    );
+    return 0;
+  }
+  dependencies.stdout.write(
+    `${replaced ? "Updated" : "Added"} ${key}${entry.tools ? "" : " (tools disabled)"}.\n` +
+      `Use it now:  pilot chat --model ${key}\n`,
+  );
+  return 0;
+}
+
+async function removeModel(
+  command: ModelsCommand,
+  key: string,
+  existing: Awaited<ReturnType<typeof readPersistedModels>>,
+  storePath: string,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if ((builtinModelKeys as readonly string[]).includes(key)) {
+    dependencies.stderr.write(`${key} is a built-in model and cannot be removed.\n`);
+    return 1;
+  }
+  const { models, removed } = removePersistedModel(existing, key);
+  if (!removed) {
+    dependencies.stderr.write(
+      `${key} is not a saved model. Run pilot models to list saved models.\n`,
+    );
+    return 1;
+  }
+  await writePersistedModels(storePath, models);
+  if (command.json) {
+    dependencies.stdout.write(`${JSON.stringify({ action: "removed", key })}\n`);
+    return 0;
+  }
+  dependencies.stdout.write(`Removed ${key}.\n`);
+  return 0;
+}
+
 function renderModels(registry: ModelRegistry, json: boolean, writer: TextWriter): void {
   const descriptors = [...registry.list()].sort((left, right) => {
     const priorityDifference = modelPriority(left.metadata) - modelPriority(right.metadata);
@@ -664,10 +877,42 @@ function modelPriority(metadata: Readonly<Record<string, unknown>> | undefined):
   return typeof priority === "number" && Number.isFinite(priority) ? priority : 1_000;
 }
 
+/**
+ * Expands `@` mentions in a submitted line into attached file context. Ignore
+ * rules are enforced inside {@link resolveContextMentions}, so gitignored files
+ * are reported as skipped rather than read. Any unexpected failure degrades
+ * gracefully to the original text so a turn is never blocked by mention
+ * resolution.
+ */
+async function resolveMentionContext(
+  text: string,
+  boundary: WorkspaceBoundary,
+  signal: AbortSignal | undefined,
+): Promise<ContextMentionResolution> {
+  try {
+    return await resolveContextMentions({
+      text,
+      boundary,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch {
+    return { augmentedText: text, attachments: [], skipped: [] };
+  }
+}
+
 async function executeRun(command: RunCommand, dependencies: CliDependencies): Promise<number> {
   const sessionIdentifier = dependencies.ids.next();
   const runIdentifier = runId(dependencies.ids.next());
   const messageIdentifier = dependencies.ids.next();
+  const boundary = await NodeWorkspaceBoundary.create(dependencies.workspacePath ?? process.cwd());
+  const mentionContext = await resolveMentionContext(command.prompt, boundary, dependencies.signal);
+  const mentionSummary = formatContextAttachmentSummary({
+    attached: mentionContext.attachments,
+    skipped: mentionContext.skipped,
+  });
+  if (mentionSummary !== undefined) {
+    dependencies.stderr.write(`${mentionSummary}\n`);
+  }
   const request = parseModelRequest({
     messages: [
       parseAgentMessage({
@@ -677,7 +922,7 @@ async function executeRun(command: RunCommand, dependencies: CliDependencies): P
         runId: runIdentifier,
         role: "user",
         status: "complete",
-        parts: [{ type: "text", text: command.prompt }],
+        parts: [{ type: "text", text: mentionContext.augmentedText }],
         createdAt: dependencies.clock.now().toISOString(),
         provenance: { kind: "user", channel: "cli" },
       }),
@@ -1117,11 +1362,31 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       continue;
     }
 
+    const mentionContext = await resolveMentionContext(text, boundary, dependencies.signal);
+    if (mentionContext.attachments.length > 0 || mentionContext.skipped.length > 0) {
+      emit({
+        type: "chat.context.attached",
+        sessionId: id,
+        payload: {
+          attached: mentionContext.attachments.map(({ path, bytes, truncated }) => ({
+            path,
+            bytes,
+            truncated,
+          })),
+          skipped: mentionContext.skipped.map(({ path, reason, detail }) => ({
+            path,
+            reason,
+            ...(detail === undefined ? {} : { detail }),
+          })),
+        },
+      });
+    }
+
     const queue = new RunInterruptionQueue();
     const turnStartedAt = dependencies.monotonicNow?.() ?? performance.now();
     const turn = conversation.runTurn({
       sessionId: id,
-      text,
+      text: mentionContext.augmentedText,
       channel: "cli",
       modelKey: activeModelKey,
       request: { tools: tools.modelDefinitions(), maxOutputTokens: 4_096 },

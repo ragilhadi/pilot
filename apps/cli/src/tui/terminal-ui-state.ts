@@ -202,6 +202,13 @@ export function reduceTerminalUi(
         ...appendNotice(sequencedState, event, "info", "Follow-up queued"),
         queuedInputCount: sequencedState.queuedInputCount + 1,
       };
+    case "chat.context.attached":
+      return appendNotice(
+        sequencedState,
+        event,
+        event.payload.skipped.length > 0 ? "warning" : "success",
+        contextAttachmentSummary(event.payload),
+      );
     case "model.stream":
       return reduceModelEvent(sequencedState, event);
     case "tool.execution":
@@ -613,6 +620,38 @@ function failedState(
 
 function contextSummary(snapshot: PromptCompositionSnapshot): string {
   return `Context cycle ${snapshot.cycle}: ${snapshot.selected.length} selected, ${snapshot.excluded.length} excluded, ${snapshot.composedTokens}/${snapshot.budget.availableCandidateTokens} tokens`;
+}
+
+function contextAttachmentSummary(payload: {
+  readonly attached: readonly { readonly path: string; readonly truncated: boolean }[];
+  readonly skipped: readonly {
+    readonly path: string;
+    readonly reason: string;
+    readonly detail?: string;
+  }[];
+}): string {
+  const segments: string[] = [];
+  if (payload.attached.length > 0) {
+    const files = payload.attached
+      .map((file) => `${file.path}${file.truncated ? " (truncated)" : ""}`)
+      .join(", ");
+    segments.push(`Attached ${payload.attached.length === 1 ? "file" : "files"}: ${files}`);
+  }
+  if (payload.skipped.length > 0) {
+    const files = payload.skipped
+      .map((file) => {
+        const why =
+          file.reason === "ignored"
+            ? file.detail === undefined
+              ? "ignored"
+              : `ignored by ${file.detail}`
+            : file.reason.replaceAll("-", " ");
+        return `${file.path} (${why})`;
+      })
+      .join(", ");
+    segments.push(`Skipped: ${files}`);
+  }
+  return segments.join(" · ");
 }
 
 function findLastIndex<T>(values: readonly T[], predicate: (value: T) => boolean): number {

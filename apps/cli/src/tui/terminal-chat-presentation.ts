@@ -1,12 +1,5 @@
 import path from "node:path";
-import {
-  CombinedAutocompleteProvider,
-  Editor,
-  Key,
-  matchesKey,
-  type Terminal,
-  TUI,
-} from "@earendil-works/pi-tui";
+import { Editor, Key, matchesKey, type Terminal, TUI } from "@earendil-works/pi-tui";
 import type { PermissionApprovalRequest } from "@pilotrun/core";
 import type { ChatEvent } from "../chat-events.js";
 import type { InteractiveChatPresentation } from "../presentation/chat-presentation.js";
@@ -17,6 +10,7 @@ import { DismissableDialog, overlayOptions, SelectionDialog } from "./components
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { PilotFooter } from "./components/footer.js";
 import { PilotScreen, type RepositoryDisplayState } from "./components/screen.js";
+import { WorkspaceFileAutocompleteProvider } from "./workspace-file-autocomplete.js";
 import {
   applyPilotTheme,
   createPilotTheme,
@@ -99,8 +93,8 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       autocompleteMaxVisible: 7,
     });
     this.#editor.setAutocompleteProvider(
-      new CombinedAutocompleteProvider(
-        [
+      new WorkspaceFileAutocompleteProvider({
+        commands: [
           { name: "help", description: "Show commands and shortcuts" },
           { name: "context", description: "Inspect selected model context" },
           { name: "models", description: "Select the model for the next turn" },
@@ -110,8 +104,8 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
           { name: "abort", description: "Cancel the active turn" },
           { name: "exit", description: "End the chat session" },
         ],
-        this.#workspacePath,
-      ),
+        basePath: this.#workspacePath,
+      }),
     );
     this.#footer = new PilotFooter(() => this.#state, this.#theme, options.capabilities);
     this.#editor.onSubmit = (text) => this.#submit(text);
@@ -258,6 +252,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "Enter        Send prompt / confirm selection",
         "Ctrl+J       Insert newline",
         "Tab          Accept command or file completion",
+        "@path        Attach a file as context (ignored files are skipped)",
         "Esc          Close dialog or cancel active turn",
         "Ctrl+O       Toggle detailed tool output",
         "Ctrl+Y       Copy a code block (empty composer)",

@@ -55,14 +55,39 @@ pilot chat
 ```
 
 Override the local endpoint with `PILOT_OLLAMA_BASE_URL` if your daemon listens elsewhere.
-Additional OpenAI-compatible models can be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON`
-(a JSON array of `{ provider, modelId, displayName, capabilities }` entries; credentials must be
-environment-variable references, never raw keys).
+
+### Adding models
+
+Pull a model in Ollama, then register it with Pilot so it persists across sessions:
+
+```sh
+ollama pull deepseek-v4-flash:cloud
+pilot models add deepseek-v4-flash:cloud
+pilot chat --model ollama/deepseek-v4-flash:cloud
+```
+
+`pilot models add` saves the model to `<data-dir>/models.json` (default `~/.pilot/models.json`),
+so it shows up in `pilot models` and is selectable from then on — no environment variables needed.
+Flags: `--provider` (default `ollama`), `--name`, `--base-url`, `--no-tools` (for models without
+tool-calling), and `--vision`. Remove one with `pilot models remove <model-id>`.
+
+For advanced setups (custom providers, credential references), additional OpenAI-compatible models
+can also be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON` (a JSON array of
+`{ provider, modelId, displayName, capabilities }` entries; credentials must be environment-variable
+references, never raw keys).
 
 In an interactive terminal, `chat` uses a full-screen TUI automatically (multiline editor,
 history, `/` and `@` completion, streaming Markdown, permission prompts). Force a mode
 explicitly with `--ui tui`, `--ui plain`, `--screen-reader`, or `--json`. Sessions and tool
 activity are stored in SQLite under `PILOT_DATA_DIR` (default `~/.pilot`).
+
+Reference a file as context by typing `@` followed by its path (`@src/index.ts`, or
+`@"a file with spaces.ts"` for paths with spaces); the picker lists workspace files as you type.
+On send, Pilot reads each referenced file and includes its contents alongside your message —
+both in interactive `chat` and in `pilot run "…"`. Files hidden by `.gitignore`, `.ignore`,
+`.pilotignore`, or the protected builtins (for example a `.env`) are never read and are reported
+as skipped, so secrets can't be pulled into a prompt by mistake. This applies everywhere,
+including the completion picker.
 
 Every tool call that isn't read-only asks for approval before it runs, showing the exact diff
 or command. Approve with `allow`/`deny`, optionally scoped to `once`, `session`, `tool`,

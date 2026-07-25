@@ -32,6 +32,16 @@ export {
 } from "./repository-discovery.js";
 export { compileGlobPattern, GlobPatternError } from "./glob-pattern.js";
 export {
+  parseMentions,
+  resolveContextMentions,
+  type ContextMentionResolution,
+  type MentionAttachment,
+  type MentionSkipReason,
+  type ParsedMention,
+  type ResolveContextMentionsOptions,
+  type SkippedMention,
+} from "./context-mention.js";
+export {
   createBuiltinFileListTools,
   FileListEntrySchema,
   FileToolError,

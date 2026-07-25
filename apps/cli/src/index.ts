@@ -30,6 +30,7 @@ import { defaultConfigurationPaths, loadCliConfiguration } from "./configuration
 import { NodeInstructionFileReader } from "./node-instruction-reader.js";
 import { PilotDoctor } from "./diagnostics.js";
 import { createModelCatalog, inspectProviderCredentials } from "./model-catalog.js";
+import { modelsStorePath, readPersistedModels } from "./model-store.js";
 import type { InteractiveChatPresentation } from "./presentation/chat-presentation.js";
 import { detectTerminalCapabilities } from "./presentation/terminal-capabilities.js";
 import {
@@ -216,7 +217,10 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
           configuredDataDirectory === undefined
             ? defaultDataDirectory
             : path.resolve(process.cwd(), configuredDataDirectory);
-        const registry = createModelCatalog({ environment: process.env });
+        const persistedModels = await readPersistedModels(
+          modelsStorePath(instructionDataDirectory),
+        );
+        const registry = createModelCatalog({ environment: process.env, persistedModels });
         const logger = new StructuredLogger({
           writer: process.stderr,
           level: parseLogLevel(process.env[pilotLogLevelEnvironmentVariable]),
@@ -259,6 +263,7 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
         const commandExitCode = await runCli(args, {
           registry,
           configuration,
+          dataDirectory: instructionDataDirectory,
           clock: { now: () => new Date() },
           ids: { next: randomUUID },
           stdout: process.stdout,
