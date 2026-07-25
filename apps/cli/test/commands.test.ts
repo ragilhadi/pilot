@@ -743,6 +743,7 @@ describe("pilot chat", () => {
       expect(model.calls[0]?.request.tools.map(({ name }) => name)).toEqual([
         "apply_patch",
         "create_file",
+        "edit",
         "git_diff",
         "git_status",
         "glob",

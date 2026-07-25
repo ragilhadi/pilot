@@ -119,6 +119,14 @@ export {
   type WriteFileOutput,
 } from "./write-file-tool.js";
 export {
+  createEditFileTool,
+  EditFileInputSchema,
+  EditFileOutputSchema,
+  EditFileToolError,
+  type EditFileInput,
+  type EditFileOutput,
+} from "./edit-file-tool.js";
+export {
   classifyCommandRisk,
   type CommandIntent,
   type CommandRiskClassification,

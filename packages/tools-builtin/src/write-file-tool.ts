@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { defineTool, type ToolDefinition } from "@pilotrun/core";
+import { defineTool, PilotError, type ToolDefinition } from "@pilotrun/core";
 import * as z from "zod";
 import type { ChangeJournal } from "./change-journal.js";
 import type { WorkspaceFileSystem } from "./workspace-file-system.js";
@@ -13,6 +13,7 @@ export const WriteFileInputSchema = z
   .object({
     path: z.string().min(1).max(4_096),
     content: z.string().max(1_000_000),
+    baseSha256: sha256Schema.optional(),
   })
   .strict()
   .readonly();
@@ -23,6 +24,7 @@ export const WriteFileOutputSchema = z
     sha256: sha256Schema,
     sizeBytes: z.number().int().nonnegative(),
     lineCount: z.number().int().nonnegative(),
+    created: z.boolean(),
     journalSequence: z.number().int().positive(),
   })
   .strict()
@@ -38,8 +40,9 @@ export function createWriteFileTool(
   return defineTool({
     name: "create_file",
     description:
-      "Create one new UTF-8 workspace file with the given content. This tool only creates files; " +
-      "it fails if the file already exists. To modify an existing file, use apply_patch instead.",
+      "Write a whole UTF-8 workspace file. Without baseSha256 it creates a new file and fails if the " +
+      "path already exists. Pass the current baseSha256 to overwrite an existing file's entire " +
+      "contents, guarded by that hash. To change part of a file, prefer edit or apply_patch.",
     inputSchema: WriteFileInputSchema,
     outputSchema: WriteFileOutputSchema,
     metadata: {
@@ -50,41 +53,92 @@ export function createWriteFileTool(
       requiredPermissions: ["workspace.write"],
     },
     execute: async (input, context) => {
-      const created = await fileSystem.createUtf8({
+      const lineCount = countLines(input.content);
+      if (input.baseSha256 === undefined) {
+        const created = await fileSystem.createUtf8({
+          path: input.path,
+          content: input.content,
+          signal: context.signal,
+        });
+        const entry = journal.recordApplied({
+          runId: context.runId,
+          callId: context.callId,
+          path: created.path,
+          beforeSha256: emptyContentSha256,
+          afterSha256: created.sha256,
+          additions: lineCount,
+          deletions: 0,
+          originalContent: "",
+        });
+        return {
+          output: Object.freeze({
+            path: created.path,
+            sha256: created.sha256,
+            sizeBytes: created.sizeBytes,
+            lineCount,
+            created: true,
+            journalSequence: entry.sequence,
+          }),
+          metadata: {
+            changed: true,
+            created: true,
+            sourcePath: created.path,
+            beforeSha256: emptyContentSha256,
+            afterSha256: created.sha256,
+            journalSequence: entry.sequence,
+          },
+        };
+      }
+
+      const original = await fileSystem.readUtf8(input.path, context.signal);
+      assertBaseMatches(input.baseSha256, original.sha256, original.path);
+      const replacement = await fileSystem.replaceUtf8Atomic({
         path: input.path,
+        expectedSha256: input.baseSha256,
         content: input.content,
         signal: context.signal,
       });
-      const lineCount = countLines(input.content);
       const entry = journal.recordApplied({
         runId: context.runId,
         callId: context.callId,
-        path: created.path,
-        beforeSha256: emptyContentSha256,
-        afterSha256: created.sha256,
+        path: replacement.path,
+        beforeSha256: replacement.beforeSha256,
+        afterSha256: replacement.afterSha256,
         additions: lineCount,
-        deletions: 0,
-        originalContent: "",
+        deletions: countLines(original.content),
+        originalContent: original.content,
       });
       return {
         output: Object.freeze({
-          path: created.path,
-          sha256: created.sha256,
-          sizeBytes: created.sizeBytes,
+          path: replacement.path,
+          sha256: replacement.afterSha256,
+          sizeBytes: replacement.sizeBytes,
           lineCount,
+          created: false,
           journalSequence: entry.sequence,
         }),
         metadata: {
           changed: true,
-          created: true,
-          sourcePath: created.path,
-          beforeSha256: emptyContentSha256,
-          afterSha256: created.sha256,
+          created: false,
+          sourcePath: replacement.path,
+          beforeSha256: replacement.beforeSha256,
+          afterSha256: replacement.afterSha256,
           journalSequence: entry.sequence,
         },
       };
     },
   });
+}
+
+function assertBaseMatches(expected: string, actual: string, path: string): void {
+  if (expected !== actual) {
+    throw new PilotError({
+      code: "PILOT_PATCH_BASE_MISMATCH",
+      message: "The overwrite target changed before it could be replaced",
+      safeMessage: "The target file changed after it was read",
+      metadata: { path, expectedSha256: expected, actualSha256: actual },
+    });
+  }
 }
 
 function countLines(content: string): number {
