@@ -31,6 +31,7 @@ import {
   SessionError,
   sessionId,
   toSafeErrorSnapshot,
+  type WorkspaceBoundary,
 } from "@pilotrun/core";
 import {
   diagnoseSqliteDatabase,
@@ -52,9 +53,15 @@ import {
   InMemoryTodoStore,
   NodeWorkspaceFileSystem,
   NodeWorkspaceBoundary,
+  resolveContextMentions,
+  type ContextMentionResolution,
   type GitCommandRunner,
 } from "@pilotrun/tools-builtin";
-import { ChatEventFactory, ChatEventRenderer } from "./chat-events.js";
+import {
+  ChatEventFactory,
+  ChatEventRenderer,
+  formatContextAttachmentSummary,
+} from "./chat-events.js";
 import { CliUserInteraction } from "./cli-user-interaction.js";
 import { type PilotDoctor, renderDoctorReport } from "./diagnostics.js";
 import { defaultCliModelKey } from "./model-catalog.js";
@@ -664,10 +671,42 @@ function modelPriority(metadata: Readonly<Record<string, unknown>> | undefined):
   return typeof priority === "number" && Number.isFinite(priority) ? priority : 1_000;
 }
 
+/**
+ * Expands `@` mentions in a submitted line into attached file context. Ignore
+ * rules are enforced inside {@link resolveContextMentions}, so gitignored files
+ * are reported as skipped rather than read. Any unexpected failure degrades
+ * gracefully to the original text so a turn is never blocked by mention
+ * resolution.
+ */
+async function resolveMentionContext(
+  text: string,
+  boundary: WorkspaceBoundary,
+  signal: AbortSignal | undefined,
+): Promise<ContextMentionResolution> {
+  try {
+    return await resolveContextMentions({
+      text,
+      boundary,
+      ...(signal === undefined ? {} : { signal }),
+    });
+  } catch {
+    return { augmentedText: text, attachments: [], skipped: [] };
+  }
+}
+
 async function executeRun(command: RunCommand, dependencies: CliDependencies): Promise<number> {
   const sessionIdentifier = dependencies.ids.next();
   const runIdentifier = runId(dependencies.ids.next());
   const messageIdentifier = dependencies.ids.next();
+  const boundary = await NodeWorkspaceBoundary.create(dependencies.workspacePath ?? process.cwd());
+  const mentionContext = await resolveMentionContext(command.prompt, boundary, dependencies.signal);
+  const mentionSummary = formatContextAttachmentSummary({
+    attached: mentionContext.attachments,
+    skipped: mentionContext.skipped,
+  });
+  if (mentionSummary !== undefined) {
+    dependencies.stderr.write(`${mentionSummary}\n`);
+  }
   const request = parseModelRequest({
     messages: [
       parseAgentMessage({
@@ -677,7 +716,7 @@ async function executeRun(command: RunCommand, dependencies: CliDependencies): P
         runId: runIdentifier,
         role: "user",
         status: "complete",
-        parts: [{ type: "text", text: command.prompt }],
+        parts: [{ type: "text", text: mentionContext.augmentedText }],
         createdAt: dependencies.clock.now().toISOString(),
         provenance: { kind: "user", channel: "cli" },
       }),
@@ -1117,11 +1156,31 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       continue;
     }
 
+    const mentionContext = await resolveMentionContext(text, boundary, dependencies.signal);
+    if (mentionContext.attachments.length > 0 || mentionContext.skipped.length > 0) {
+      emit({
+        type: "chat.context.attached",
+        sessionId: id,
+        payload: {
+          attached: mentionContext.attachments.map(({ path, bytes, truncated }) => ({
+            path,
+            bytes,
+            truncated,
+          })),
+          skipped: mentionContext.skipped.map(({ path, reason, detail }) => ({
+            path,
+            reason,
+            ...(detail === undefined ? {} : { detail }),
+          })),
+        },
+      });
+    }
+
     const queue = new RunInterruptionQueue();
     const turnStartedAt = dependencies.monotonicNow?.() ?? performance.now();
     const turn = conversation.runTurn({
       sessionId: id,
-      text,
+      text: mentionContext.augmentedText,
       channel: "cli",
       modelKey: activeModelKey,
       request: { tools: tools.modelDefinitions(), maxOutputTokens: 4_096 },

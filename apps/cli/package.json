@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/cli",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Terminal-first, provider-neutral coding agent CLI.",
   "license": "MIT",
   "publishConfig": {

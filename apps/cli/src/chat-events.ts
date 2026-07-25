@@ -35,6 +35,21 @@ export type ChatEvent =
   | ChatEventBase<"chat.help", { readonly commands: readonly string[] }>
   | ChatEventBase<"chat.context", { readonly snapshot?: PromptCompositionSnapshot }>
   | ChatEventBase<"chat.input.queued", { readonly messageId: string }>
+  | ChatEventBase<
+      "chat.context.attached",
+      {
+        readonly attached: readonly {
+          readonly path: string;
+          readonly bytes: number;
+          readonly truncated: boolean;
+        }[];
+        readonly skipped: readonly {
+          readonly path: string;
+          readonly reason: string;
+          readonly detail?: string;
+        }[];
+      }
+    >
   | ChatEventBase<"model.stream", { readonly event: ModelStreamEvent }>
   | ChatEventBase<
       "tool.execution",
@@ -122,6 +137,13 @@ export class ChatEventRenderer {
       case "chat.input.queued":
         this.#stdout.write("\n[follow-up queued]\n");
         break;
+      case "chat.context.attached": {
+        const summary = formatContextAttachmentSummary(event.payload);
+        if (summary !== undefined) {
+          this.#stdout.write(`${summary}\n`);
+        }
+        break;
+      }
       case "model.stream":
         if (event.payload.event.type === "text.delta") {
           this.#stdout.write(event.payload.event.delta);
@@ -203,6 +225,51 @@ export class ChatEventRenderer {
         `- ${sanitizeTerminalText(entry.id)} reason=${entry.reason} source=${sanitizeTerminalText(entry.sourceId)} tokens=${entry.estimatedTokens} ref=${sanitizeTerminalText(entry.reference)}\n`,
       );
     }
+  }
+}
+
+/**
+ * Renders a one-line summary of the files attached via `@` mentions and any
+ * mentions that were skipped (including ignore-blocked files). Returns
+ * `undefined` when there is nothing to report.
+ */
+export function formatContextAttachmentSummary(payload: {
+  readonly attached: readonly { readonly path: string; readonly truncated: boolean }[];
+  readonly skipped: readonly {
+    readonly path: string;
+    readonly reason: string;
+    readonly detail?: string;
+  }[];
+}): string | undefined {
+  if (payload.attached.length === 0 && payload.skipped.length === 0) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  for (const file of payload.attached) {
+    parts.push(`+${file.path}${file.truncated ? " (truncated)" : ""}`);
+  }
+  for (const file of payload.skipped) {
+    parts.push(`-${file.path} (${describeSkipReason(file.reason, file.detail)})`);
+  }
+  return `[context: ${parts.join(", ")}]`;
+}
+
+function describeSkipReason(reason: string, detail: string | undefined): string {
+  switch (reason) {
+    case "ignored":
+      return detail === undefined ? "ignored" : `ignored by ${detail}`;
+    case "not-found":
+      return "not found";
+    case "outside-workspace":
+      return "outside workspace";
+    case "not-a-file":
+      return "not a file";
+    case "budget-exceeded":
+      return "context budget reached";
+    case "unreadable":
+      return "unreadable";
+    default:
+      return reason;
   }
 }
 

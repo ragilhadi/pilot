@@ -64,6 +64,14 @@ history, `/` and `@` completion, streaming Markdown, permission prompts). Force 
 explicitly with `--ui tui`, `--ui plain`, `--screen-reader`, or `--json`. Sessions and tool
 activity are stored in SQLite under `PILOT_DATA_DIR` (default `~/.pilot`).
 
+Reference a file as context by typing `@` followed by its path (`@src/index.ts`, or
+`@"a file with spaces.ts"` for paths with spaces); the picker lists workspace files as you type.
+On send, Pilot reads each referenced file and includes its contents alongside your message —
+both in interactive `chat` and in `pilot run "…"`. Files hidden by `.gitignore`, `.ignore`,
+`.pilotignore`, or the protected builtins (for example a `.env`) are never read and are reported
+as skipped, so secrets can't be pulled into a prompt by mistake. This applies everywhere,
+including the completion picker.
+
 Every tool call that isn't read-only asks for approval before it runs, showing the exact diff
 or command. Approve with `allow`/`deny`, optionally scoped to `once`, `session`, `tool`,
 `workspace`, or `application`.
