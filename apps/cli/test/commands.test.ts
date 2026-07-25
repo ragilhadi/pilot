@@ -232,7 +232,7 @@ describe("pilot run", () => {
     [["unknown"], "unknown command unknown"],
     [["run"], "non-empty prompt"],
     [["run", "--model", "fake/test"], "non-empty prompt"],
-    [["models", "--unknown"], "models accepts only"],
+    [["models", "--unknown"], "unknown option --unknown"],
     [["chat", "--ui", "rich"], "--ui requires one of"],
   ] as const)("returns usage status 2 for %j", async (args, expectedMessage) => {
     const { dependencies, stderr } = cliDependencies(createModelCatalog({ environment: {} }));
