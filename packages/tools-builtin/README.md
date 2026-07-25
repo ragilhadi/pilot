@@ -6,8 +6,13 @@ agent uses to inspect and change a repository — each one boundary-checked, san
 workspace, and permission-gated.
 
 Included tools: `list_files`, `glob`, `grep`, `read_file`, `apply_patch`, `edit`, `create_file`,
-`run_command`, `git_status`, and `git_diff`. All reads and writes resolve through a workspace
-boundary (real-path containment, symlink-escape prevention) before touching the filesystem.
+`run_command`, `git_status`, `git_diff`, `todo_write`, and `todo_read`. All reads and writes
+resolve through a workspace boundary (real-path containment, symlink-escape prevention) before
+touching the filesystem.
+
+`todo_write`/`todo_read` maintain a structured, in-session task list so the agent can plan and
+track progress across multi-step work. They mutate only in-session state (no workspace, network,
+or system side effects), so they are permission-free.
 
 The write surface offers three complementary primitives, all SHA-256-guarded and journal-backed:
 `create_file` (create a new file, or overwrite an existing one when its `baseSha256` is supplied),

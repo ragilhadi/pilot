@@ -751,6 +751,8 @@ describe("pilot chat", () => {
         "list_files",
         "read_file",
         "run_command",
+        "todo_read",
+        "todo_write",
       ]);
       expect(model.calls[1]?.request.messages.at(-1)).toMatchObject({
         role: "tool",

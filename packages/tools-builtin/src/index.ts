@@ -128,6 +128,25 @@ export {
   type EditFileOutput,
 } from "./edit-file-tool.js";
 export {
+  createTodoReadTool,
+  createTodoTools,
+  createTodoWriteTool,
+  InMemoryTodoStore,
+  TodoItemSchema,
+  TodoListOutputSchema,
+  TodoReadInputSchema,
+  TodoStatusSchema,
+  TodoToolError,
+  TodoWriteInputSchema,
+  type TodoItem,
+  type TodoListOutput,
+  type TodoReadInput,
+  type TodoStatus,
+  type TodoStore,
+  type TodoTools,
+  type TodoWriteInput,
+} from "./todo-tools.js";
+export {
   classifyCommandRisk,
   type CommandIntent,
   type CommandRiskClassification,
