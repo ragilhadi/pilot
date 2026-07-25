@@ -46,6 +46,7 @@ import {
   createReadFileTool,
   createRunCommandTool,
   createTodoTools,
+  createWebFetchTool,
   createWriteFileTool,
   InMemoryChangeJournal,
   InMemoryTodoStore,
@@ -801,6 +802,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       createWriteFileTool(workspaceFileSystem, changeJournal),
       todoTools.todoWrite,
       todoTools.todoRead,
+      createWebFetchTool(),
       createRunCommandTool(boundary, {
         environment: process.env,
         onOutput: (event, context) => {
