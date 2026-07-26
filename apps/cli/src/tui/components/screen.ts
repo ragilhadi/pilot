@@ -4,6 +4,7 @@ import type { JsonValue } from "@pilotrun/core";
 import type { TerminalCapabilitySnapshot } from "../../presentation/presentation-mode.js";
 import { sanitizeTerminalText } from "../../presentation/sanitize-terminal-text.js";
 import {
+  activityIndicator,
   formatDuration,
   patchFromInput,
   previewLines,
@@ -24,12 +25,19 @@ export interface RepositoryDisplayState {
   readonly dirty: boolean;
 }
 
+/** A snapshot of the running activity animation, advanced by the presentation's timer. */
+export interface ActivitySnapshot {
+  readonly frame: number;
+  readonly elapsedMs: number;
+}
+
 export class PilotScreen implements Component {
   readonly #state: () => TerminalUiState;
   readonly #theme: PilotTheme;
   readonly #capabilities: TerminalCapabilitySnapshot;
   readonly #workspacePath: string;
   readonly #repository: RepositoryDisplayState | undefined;
+  readonly #activity: () => ActivitySnapshot | undefined;
   readonly #blockCache = new Map<
     string,
     { readonly block: TranscriptBlock; readonly lines: readonly string[] }
@@ -41,12 +49,14 @@ export class PilotScreen implements Component {
     capabilities: TerminalCapabilitySnapshot,
     workspacePath: string,
     repository?: RepositoryDisplayState,
+    activity?: () => ActivitySnapshot | undefined,
   ) {
     this.#state = state;
     this.#theme = theme;
     this.#capabilities = capabilities;
     this.#workspacePath = workspacePath;
     this.#repository = repository;
+    this.#activity = activity ?? (() => undefined);
   }
 
   invalidate(): void {
@@ -93,6 +103,16 @@ export class PilotScreen implements Component {
         "",
       );
     }
+    const activity = this.#activity();
+    if (activity !== undefined) {
+      const indicator = activityIndicator(
+        state.phase,
+        activity.frame,
+        activity.elapsedMs,
+        this.#capabilities.unicode,
+      );
+      if (indicator !== undefined) lines.push(this.#theme.accent(indicator), "");
+    }
     return lines;
   }
 
@@ -117,11 +137,7 @@ export class PilotScreen implements Component {
     }
     if (block.kind === "assistant") {
       const marker = this.#capabilities.unicode ? "◆ " : "";
-      const status =
-        block.status === "streaming"
-          ? this.#theme.muted(this.#capabilities.unicode ? "  ● working" : "  working")
-          : "";
-      const lines = [`${this.#theme.strong(`${marker}Pilot`)}${status}`];
+      const lines = [this.#theme.strong(`${marker}Pilot`)];
       if (showThinking && block.reasoning !== undefined && block.reasoning.trim().length > 0) {
         const label = this.#capabilities.unicode ? "  ● thinking" : "  thinking";
         lines.push(this.#theme.muted(label));

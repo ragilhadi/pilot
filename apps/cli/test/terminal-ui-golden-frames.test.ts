@@ -1,5 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
+import { activityIndicator } from "../src/tui/render-helpers.js";
 import { PilotFooter, PilotScreen } from "../src/tui/terminal-chat-presentation.js";
 import { type TerminalUiState, initialTerminalUiState } from "../src/tui/terminal-ui-state.js";
 import { createPilotTheme, pilotThemeModes } from "../src/tui/theme.js";
@@ -82,6 +83,61 @@ describe("terminal UI golden frames", () => {
       .join("\n");
     expect(frame).toContain("\u001b[");
     expect(frame).not.toContain("\uFFFD");
+  });
+
+  it("animates the activity indicator across frames and hides it when idle", () => {
+    expect(activityIndicator("ready", 0, 0, true)).toBeUndefined();
+    expect(activityIndicator("streaming", 0, 0, true)).toBe("⠋ Thinking");
+    expect(activityIndicator("streaming", 1, 0, true)).toBe("⠙ Thinking.");
+    expect(activityIndicator("streaming", 3, 0, true)).toBe("⠸ Thinking...");
+    // Frames wrap around the spinner (10) and dot (4) cycles independently.
+    expect(activityIndicator("streaming", 10, 0, true)).toBe("⠋ Thinking..");
+    expect(activityIndicator("running-tool", 0, 4_200, false)).toBe("| Working  4.2s");
+    // Elapsed time is only shown once at least a second has passed.
+    expect(activityIndicator("streaming", 0, 400, true)).toBe("⠋ Thinking");
+  });
+
+  it("renders the animated activity line while streaming and drops it when idle", () => {
+    const streaming: TerminalUiState = {
+      ...goldenState,
+      phase: "streaming",
+      blocks: [
+        {
+          kind: "assistant",
+          id: "assistant:streaming",
+          responseId: "response:streaming",
+          text: "",
+          status: "streaming",
+        },
+      ],
+    };
+    const theme = createPilotTheme(capabilities);
+    const busy = new PilotScreen(
+      () => streaming,
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+      undefined,
+      () => ({ frame: 2, elapsedMs: 3_000 }),
+    )
+      .render(100)
+      .join("\n");
+    const idle = new PilotScreen(
+      () => streaming,
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+      undefined,
+      () => undefined,
+    )
+      .render(100)
+      .join("\n");
+
+    expect(busy).toContain("Thinking");
+    expect(busy).toContain("3.0s");
+    // The inline "working" suffix is gone; the animated line is the single indicator.
+    expect(busy).not.toContain("● working");
+    expect(idle).not.toContain("Thinking");
   });
 
   it("renders assistant reasoning only when thinking is toggled on", () => {
