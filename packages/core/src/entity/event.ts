@@ -1,6 +1,5 @@
-import type { CorrelationId, EventId, RunId, SessionId } from "./brand.js";
-
-export const eventSchemaVersion = 1 as const;
+import type { CorrelationId, EventId, RunId, SessionId } from "../shared/brand.js";
+import type { eventSchemaVersion } from "../constants.js";
 
 export interface EventEnvelope<Type extends string, Payload> {
   readonly schemaVersion: typeof eventSchemaVersion;

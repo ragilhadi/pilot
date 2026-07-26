@@ -1,4 +1,4 @@
-import { InvalidIdentifierError } from "./errors.js";
+import { InvalidIdentifierError } from "../errors/pilot-error.js";
 
 declare const brand: unique symbol;
 

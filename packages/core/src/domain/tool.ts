@@ -1,9 +1,10 @@
 import * as z from "zod";
-import type { RunId, ToolCallId } from "./brand.js";
-import { JsonValueSchema, type JsonObject, type JsonValue } from "./messages.js";
-import type { ModelToolDefinition } from "./models.js";
-import type { PermissionAction } from "./permissions.js";
-import { PilotError } from "./errors.js";
+import type { RunId, ToolCallId } from "../shared/brand.js";
+import { JsonValueSchema, type JsonObject, type JsonValue } from "../shared/json.js";
+import { toolNameSchema } from "../shared/schema-fragments.js";
+import { PilotError } from "../errors/pilot-error.js";
+import type { ModelToolDefinition } from "./model.js";
+import type { PermissionAction } from "./permission.js";
 
 export const ToolRiskSchema = z.enum([
   "read-only",
@@ -102,12 +103,6 @@ export class ToolContractError extends PilotError {
     this.violation = violation;
   }
 }
-
-const toolNameSchema = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z][a-z0-9_]*$/u, "Tool names must use lowercase snake_case");
 
 export function defineTool<
   InputSchema extends AnyToolSchema,

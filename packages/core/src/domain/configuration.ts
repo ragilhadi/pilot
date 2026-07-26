@@ -1,10 +1,8 @@
 import * as z from "zod";
-import { PilotError } from "./errors.js";
-import { ModelKeySchema } from "./models.js";
-import { PermissionRuleSchema } from "./permissions.js";
-
-export const configurationSchemaVersion = 1 as const;
-export const maximumConfigurationBytes = 1_048_576;
+import { configurationSchemaVersion, maximumConfigurationBytes } from "../constants.js";
+import { PilotError } from "../errors/pilot-error.js";
+import { ModelKeySchema } from "./model.js";
+import { PermissionRuleSchema } from "./permission.js";
 
 export const EnvironmentReferenceSchema = z
   .object({
