@@ -1,10 +1,10 @@
 import type { sessionSchemaVersion } from "../constants.js";
 import type { RunId, SessionId, ToolCallId } from "../shared/brand.js";
 import type { JsonObject, JsonValue } from "../shared/json.js";
-import type { AgentMessage } from "../domain/message.js";
-import type { PermissionAuditRecord } from "../domain/permission.js";
-import type { TokenUsage } from "../domain/model.js";
-import type { ToolRisk } from "../domain/tool.js";
+import type { AgentMessage } from "../domain/message/index.js";
+import type { PermissionAuditRecord } from "../domain/permission/index.js";
+import type { TokenUsage } from "../domain/model/index.js";
+import type { ToolRisk } from "../domain/tool/index.js";
 
 export interface NewSession {
   readonly id: SessionId;
