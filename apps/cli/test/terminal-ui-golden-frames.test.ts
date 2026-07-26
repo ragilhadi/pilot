@@ -84,6 +84,46 @@ describe("terminal UI golden frames", () => {
     expect(frame).not.toContain("\uFFFD");
   });
 
+  it("renders assistant reasoning only when thinking is toggled on", () => {
+    const state: TerminalUiState = {
+      ...goldenState,
+      blocks: [
+        {
+          kind: "assistant",
+          id: "assistant:reasoning",
+          responseId: "response:reasoning",
+          text: "The answer is 42.",
+          reasoning: "First I consider the constraints, then I derive the result.",
+          status: "completed",
+        },
+      ],
+    };
+    const theme = createPilotTheme(capabilities);
+    const hidden = new PilotScreen(
+      () => ({ ...state, showThinking: false }),
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+    )
+      .render(100)
+      .join("\n");
+    const shown = new PilotScreen(
+      () => ({ ...state, showThinking: true }),
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+    )
+      .render(100)
+      .join("\n");
+
+    expect(hidden).not.toContain("thinking");
+    expect(hidden).not.toContain("derive the result");
+    expect(hidden).toContain("The answer is 42.");
+    expect(shown).toContain("thinking");
+    expect(shown).toContain("derive the result");
+    expect(shown).toContain("The answer is 42.");
+  });
+
   it("frames fenced code blocks with a language label and stays width-safe", () => {
     const state: TerminalUiState = {
       ...goldenState,

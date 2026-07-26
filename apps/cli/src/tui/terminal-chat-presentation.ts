@@ -224,6 +224,11 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#tui.requestRender();
       return { consume: true };
     }
+    if (matchesKey(data, Key.ctrl("t"))) {
+      this.#state = reduceTerminalUi(this.#state, { type: "ui.toggle-thinking" });
+      this.#tui.requestRender(true);
+      return { consume: true };
+    }
     if (matchesKey(data, Key.ctrl("r"))) {
       this.#showHistoryOverlay();
       return { consume: true };
@@ -255,6 +260,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "@path        Attach a file as context (ignored files are skipped)",
         "Esc          Close dialog or cancel active turn",
         "Ctrl+O       Toggle detailed tool output",
+        "Ctrl+T       Toggle model thinking (reasoning)",
         "Ctrl+Y       Copy a code block (empty composer)",
         "Ctrl+L       Redraw terminal",
         "Ctrl+C       Cancel, clear, then exit on second idle press",

@@ -12,7 +12,13 @@ export const EnvironmentReferenceSchema = z
   .readonly();
 
 const secretAlias = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
-const modelLayerSchema = z.object({ default: ModelKeySchema.optional() }).strict().readonly();
+const modelLayerSchema = z
+  .object({
+    default: ModelKeySchema.optional(),
+    maxOutputTokens: z.number().int().positive().optional(),
+  })
+  .strict()
+  .readonly();
 const persistenceLayerSchema = z
   .object({
     dataDirectory: z.string().min(1).max(4_096).optional(),
@@ -64,7 +70,15 @@ export const ConfigurationLayerValueSchema = z
 export const PilotConfigurationSchema = z
   .object({
     schemaVersion: z.literal(configurationSchemaVersion),
-    model: z.object({ default: ModelKeySchema }).strict().readonly(),
+    model: z
+      .object({
+        default: ModelKeySchema,
+        // The per-response output-token cap sent to the model. When omitted, Pilot falls back to
+        // the active model's declared capability, and finally to the model's own default (no cap).
+        maxOutputTokens: z.number().int().positive().optional(),
+      })
+      .strict()
+      .readonly(),
     persistence: z
       .object({
         dataDirectory: z.string().min(1).max(4_096).optional(),

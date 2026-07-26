@@ -118,6 +118,21 @@ describe("configuration resolution", () => {
     expect(Object.isFrozen(effective.provenance)).toBe(true);
   });
 
+  it("resolves an optional model output-token override", () => {
+    const effective = resolveConfiguration([
+      {
+        source: "project",
+        location: "/repo/.pilot/config.jsonc",
+        value: { model: { default: "fake/cli", maxOutputTokens: 32_000 } },
+      },
+    ]);
+
+    expect(effective.configuration.model).toMatchObject({
+      default: "fake/cli",
+      maxOutputTokens: 32_000,
+    });
+  });
+
   it("provides generous, time-primary run-budget defaults with no cumulative token cap", () => {
     const effective = resolveConfiguration([]);
     expect(effective.configuration.runBudget).toEqual({

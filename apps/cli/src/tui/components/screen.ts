@@ -75,7 +75,10 @@ export class PilotScreen implements Component {
         const divider = this.#capabilities.unicode ? "┄" : "-";
         lines.push(this.#theme.muted(divider.repeat(Math.min(Math.max(1, width), 32))), "");
       }
-      lines.push(...this.#renderBlockCached(block, width, state.showToolDetails), "");
+      lines.push(
+        ...this.#renderBlockCached(block, width, state.showToolDetails, state.showThinking),
+        "",
+      );
       previous = block;
     }
     if (this.#blockCache.size > state.blocks.length * 3 + 30) {
@@ -97,16 +100,17 @@ export class PilotScreen implements Component {
     block: TranscriptBlock,
     width: number,
     showToolDetails: boolean,
+    showThinking: boolean,
   ): readonly string[] {
-    const key = `${block.id}\0${width}\0${showToolDetails ? "details" : "compact"}`;
+    const key = `${block.id}\0${width}\0${showToolDetails ? "details" : "compact"}\0${showThinking ? "think" : "quiet"}`;
     const cached = this.#blockCache.get(key);
     if (cached?.block === block) return cached.lines;
-    const lines = this.#renderBlock(block, width);
+    const lines = this.#renderBlock(block, width, showThinking);
     this.#blockCache.set(key, { block, lines });
     return lines;
   }
 
-  #renderBlock(block: TranscriptBlock, width: number): string[] {
+  #renderBlock(block: TranscriptBlock, width: number, showThinking: boolean): string[] {
     if (block.kind === "user") {
       const label = this.#capabilities.unicode ? "› You" : "You";
       return [this.#theme.accent(label), ...wrapPlain(block.text, width, 2)];
@@ -117,8 +121,17 @@ export class PilotScreen implements Component {
         block.status === "streaming"
           ? this.#theme.muted(this.#capabilities.unicode ? "  ● working" : "  working")
           : "";
+      const lines = [`${this.#theme.strong(`${marker}Pilot`)}${status}`];
+      if (showThinking && block.reasoning !== undefined && block.reasoning.trim().length > 0) {
+        const label = this.#capabilities.unicode ? "  ● thinking" : "  thinking";
+        lines.push(this.#theme.muted(label));
+        for (const line of wrapPlain(sanitizeTerminalText(block.reasoning), width, 2)) {
+          lines.push(this.#theme.muted(line));
+        }
+      }
       const markdown = new Markdown(sanitizeTerminalText(block.text), 1, 0, this.#theme.markdown);
-      return [`${this.#theme.strong(`${marker}Pilot`)}${status}`, ...markdown.render(width)];
+      lines.push(...markdown.render(width));
+      return lines;
     }
     if (block.kind === "tool") {
       return renderTool(
