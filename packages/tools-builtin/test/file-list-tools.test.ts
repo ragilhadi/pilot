@@ -194,6 +194,12 @@ describe("glob", () => {
     },
   );
 
+  it("compiles patterns containing a literal hyphen without a RegExp escape error", () => {
+    const matcher = compileGlobPattern("packages/tools-builtin/*.ts");
+    expect(matcher.test("packages/tools-builtin/index.ts")).toBe(true);
+    expect(matcher.test("packages/tools_builtin/index.ts")).toBe(false);
+  });
+
   it("publishes strict read-only model schemas through the tool registry", async () => {
     const boundary = await NodeWorkspaceBoundary.create(workspacePath);
     const tools = createBuiltinFileListTools(boundary);

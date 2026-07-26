@@ -1,25 +1,16 @@
 import * as z from "zod";
-import type { Brand, RunId } from "./brand.js";
+import type { Brand, RunId } from "../shared/brand.js";
+import { JsonObjectSchema, JsonValueSchema } from "../shared/json.js";
 import {
-  AgentMessageSchema,
-  JsonValueSchema,
-  ToolCallIdSchema,
-  type AgentMessage,
-  type JsonObject,
-} from "./messages.js";
-import {
-  ModelContractValidationError,
-  ModelFailureSchema,
-  type ModelFailure,
-} from "./model-errors.js";
+  finishReasonSchema,
+  httpOrHttpsUrl,
+  providerIdSchema,
+  toolNameSchema,
+} from "../shared/schema-fragments.js";
+import { ModelContractValidationError, ModelFailureSchema } from "../errors/model-error.js";
+import { AgentMessageSchema, ToolCallIdSchema } from "./message.js";
 
 export type ModelKey = Brand<string, "ModelKey">;
-
-const providerIdSchema = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z][a-z0-9-]*$/u, "Provider IDs must use lowercase kebab-case");
 
 const modelIdSchema = z
   .string()
@@ -129,13 +120,6 @@ export const TokenUsageSchema = z
   .readonly();
 
 export type TokenUsage = z.output<typeof TokenUsageSchema>;
-
-const JsonObjectSchema: z.ZodType<JsonObject> = z.record(z.string(), JsonValueSchema).readonly();
-const toolNameSchema = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z][a-z0-9_]*$/u, "Tool names must use lowercase snake_case");
 
 export const ModelToolDefinitionSchema = z
   .object({
@@ -250,7 +234,7 @@ export const ModelStreamEventSchema = z.discriminatedUnion("type", [
   streamEventBase
     .extend({
       type: z.literal("response.completed"),
-      finishReason: z.enum(["content-filter", "error", "length", "stop", "tool-calls", "unknown"]),
+      finishReason: finishReasonSchema,
     })
     .strict()
     .readonly(),
@@ -273,7 +257,7 @@ export const ModelResponseSchema = z
   .object({
     responseId: z.string().min(1),
     message: AgentMessageSchema,
-    finishReason: z.enum(["content-filter", "error", "length", "stop", "tool-calls", "unknown"]),
+    finishReason: finishReasonSchema,
     usage: TokenUsageSchema.optional(),
     providerMetadata: JsonObjectSchema.optional(),
   })
@@ -328,16 +312,11 @@ export const ProviderAuthSchema = z.discriminatedUnion("type", [
 
 export type ProviderAuth = z.output<typeof ProviderAuthSchema>;
 
-const HttpUrlSchema = z.url().refine((value) => {
-  const protocol = new URL(value).protocol;
-  return protocol === "http:" || protocol === "https:";
-}, "Provider URLs must use HTTP or HTTPS");
-
 export const ProviderConfigurationSchema = z
   .object({
     providerId: providerIdSchema,
     type: z.enum(["anthropic", "custom", "google", "openai", "openai-compatible"]),
-    baseUrl: HttpUrlSchema.optional(),
+    baseUrl: httpOrHttpsUrl("Provider URLs must use HTTP or HTTPS").optional(),
     auth: ProviderAuthSchema,
     options: JsonObjectSchema.optional(),
   })
@@ -406,5 +385,3 @@ export function parseModelStreamEvent(input: unknown): ModelStreamEvent {
 export function parseProviderConfiguration(input: unknown): ProviderConfiguration {
   return parseContract("provider configuration", ProviderConfigurationSchema, input);
 }
-
-export type { AgentMessage, ModelFailure };

@@ -105,6 +105,16 @@ describe("RepositoryIgnoreRules", () => {
       source: "builtin",
     });
   });
+
+  it("compiles patterns containing a literal hyphen without a RegExp escape error", () => {
+    const rules = RepositoryIgnoreRules.parse([
+      { source: ".gitignore", content: ".pnpm-store/\nmy-cache/\n" },
+    ]);
+
+    expect(rules.evaluate(".pnpm-store", true).ignored).toBe(true);
+    expect(rules.evaluate("nested/my-cache", true).ignored).toBe(true);
+    expect(rules.evaluate("src/index.ts", false).ignored).toBe(false);
+  });
 });
 
 describe("RepositoryDiscovery", () => {
