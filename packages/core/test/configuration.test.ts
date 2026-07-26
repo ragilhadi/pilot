@@ -118,6 +118,56 @@ describe("configuration resolution", () => {
     expect(Object.isFrozen(effective.provenance)).toBe(true);
   });
 
+  it("provides generous, time-primary run-budget defaults with no cumulative token cap", () => {
+    const effective = resolveConfiguration([]);
+    expect(effective.configuration.runBudget).toEqual({
+      maxCycles: 200,
+      maxModelAttempts: 600,
+      maxToolCalls: 2_000,
+      maxElapsedMs: 1_800_000,
+    });
+    expect(effective.configuration.runBudget.maxInputTokens).toBeUndefined();
+    expect(effective.configuration.runBudget.maxEstimatedCostUsd).toBeUndefined();
+  });
+
+  it("merges run-budget overrides and records their provenance", () => {
+    const effective = resolveConfiguration([
+      {
+        source: "project",
+        location: "/repo/.pilot/config.jsonc",
+        value: { runBudget: { maxElapsedMs: 600_000, maxEstimatedCostUsd: 5 } },
+      },
+    ]);
+    expect(effective.configuration.runBudget).toEqual({
+      maxCycles: 200,
+      maxModelAttempts: 600,
+      maxToolCalls: 2_000,
+      maxElapsedMs: 600_000,
+      maxEstimatedCostUsd: 5,
+    });
+    expect(effective.provenance).toMatchObject({
+      "runBudget.maxElapsedMs": { source: "project" },
+      "runBudget.maxEstimatedCostUsd": { source: "project" },
+    });
+  });
+
+  it("rejects invalid run-budget values", () => {
+    expect(() =>
+      resolveConfiguration([
+        { source: "project", location: "project", value: { runBudget: { maxCycles: 0 } } },
+      ]),
+    ).toThrowError(ConfigurationError);
+    expect(() =>
+      resolveConfiguration([
+        {
+          source: "project",
+          location: "project",
+          value: { runBudget: { maxEstimatedCostUsd: -1 } },
+        },
+      ]),
+    ).toThrowError(ConfigurationError);
+  });
+
   it("validates cross-field constraints after merging all layers", () => {
     expect(() =>
       resolveConfiguration([

@@ -104,8 +104,30 @@ with `pilot config --json`.
   "schemaVersion": 1,
   "model": { "default": "ollama/glm-5.2:cloud" },
   "context": { "maxInputTokens": 120000, "reservedOutputTokens": 4096 },
+  "runBudget": { "maxElapsedMs": 1800000 },
 }
 ```
+
+### Run budget
+
+Each turn runs an agent loop (call the model, run tools, feed results back, repeat) bounded by a
+run budget. Wall-clock **elapsed time** is the primary limit; the cycle, model-attempt, and
+tool-call counts are generous backstops against runaway iteration, not the normal stopping point.
+Per-request context size is bounded separately by `context.maxInputTokens`, so no cumulative token
+cap is applied unless you opt into one. Every field is tunable under `runBudget` in `config.jsonc`:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `maxElapsedMs` | `1800000` (30 min) | Wall-clock limit for a single turn |
+| `maxCycles` | `200` | Model round-trips per turn |
+| `maxModelAttempts` | `600` | Model calls including retries |
+| `maxToolCalls` | `2000` | Tool calls per turn |
+| `maxInputTokens` | _unset_ | Optional cumulative input-token ceiling |
+| `maxOutputTokens` | _unset_ | Optional cumulative output-token ceiling |
+| `maxEstimatedCostUsd` | _unset_ | Optional estimated-cost ceiling (requires provider cost data) |
+
+When a limit is reached the turn ends cleanly with an exhaustion reason rather than erroring. Raise
+`maxElapsedMs` for long autonomous tasks, or set `maxEstimatedCostUsd` to cap spend.
 
 Project-level `AGENTS.md` files (discovered from the workspace root down to each requested
 file's directory) provide project instructions; a trusted `~/.pilot/AGENTS.md` provides global
