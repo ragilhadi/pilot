@@ -278,6 +278,94 @@ describe("ConversationModelRequestContextPreparer", () => {
     });
   });
 
+  it("drops an older tool exchange whole instead of splitting it, keeping the current one", async () => {
+    const callA = toolCallId("call-a");
+    const callB = toolCallId("call-b");
+    const toolCall = (
+      id: string,
+      run: string,
+      callId: typeof callA,
+      path: string,
+      second: number,
+    ) =>
+      parseAgentMessage({
+        schemaVersion: 1,
+        id,
+        sessionId: "session-1",
+        runId: run,
+        role: "assistant",
+        status: "complete",
+        parts: [{ type: "tool-call", callId, toolName: "read_file", input: { path } }],
+        createdAt: `2026-07-22T00:00:0${second}.000Z`,
+        provenance: { kind: "model", providerId: "fake", modelId: "test" },
+      });
+    const toolResult = (id: string, run: string, callId: typeof callA, second: number) =>
+      parseAgentMessage({
+        schemaVersion: 1,
+        id,
+        sessionId: "session-1",
+        runId: run,
+        role: "tool",
+        status: "complete",
+        parts: [
+          {
+            type: "tool-result",
+            callId,
+            toolName: "read_file",
+            output: { content: "x" },
+            isError: false,
+          },
+        ],
+        createdAt: `2026-07-22T00:00:0${second}.000Z`,
+        provenance: { kind: "tool", callId, toolName: "read_file" },
+      });
+    const messages = [
+      toolCall("message-call-a", "run-1", callA, "a.ts", 1),
+      toolResult("message-tool-a", "run-1", callA, 2),
+      toolCall("message-call-b", "run-2", callB, "b.ts", 3),
+      toolResult("message-tool-b", "run-2", callB, 4),
+    ];
+    const preparer = new ConversationModelRequestContextPreparer({
+      // available candidate budget = 40 - max(4,4) - 1 (empty tools) = 35 tokens; the current
+      // exchange (20) fits, but only one message of the older exchange does — which must not split.
+      configuredContextTokens: 40,
+      reservedOutputTokens: 4,
+      mandatoryRecentMessages: 1,
+      tokenEstimator: fixtureEstimator,
+      now: () => "2026-07-22T00:01:00.000Z",
+    });
+
+    const composition = await preparer.prepare({
+      request: parseModelRequest({ messages, tools: [], maxOutputTokens: 4 }),
+      descriptor: parseModelDescriptor({
+        key: "fake/test",
+        displayName: "Fake",
+        capabilities: {
+          streaming: true,
+          nativeToolCalling: true,
+          parallelToolCalls: false,
+          structuredOutput: false,
+          vision: false,
+          promptCaching: false,
+          reasoning: false,
+          configurableReasoningEffort: false,
+          systemMessages: true,
+          maxContextTokens: 40,
+          maxOutputTokens: 4,
+        },
+      }),
+      runId: runId("run-graceful"),
+      cycle: 1,
+      signal: new AbortController().signal,
+    });
+
+    // The current exchange is kept whole; the older one is dropped entirely, never split.
+    expect(composition.request.messages.map(({ id }) => id)).toEqual([
+      "message-call-b",
+      "message-tool-b",
+    ]);
+  });
+
   it("fails closed when a small budget would split a tool exchange", async () => {
     const user = userMessage("message-user", "read", 1);
     const callId = toolCallId("call-1");
