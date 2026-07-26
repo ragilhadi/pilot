@@ -194,6 +194,7 @@ export {
 } from "./in-memory-session-repository.js";
 export {
   SessionConversationRunner,
+  type ConversationIncomplete,
   type ConversationModelRequest,
   type ConversationRunRecord,
   type ConversationTurnInput,

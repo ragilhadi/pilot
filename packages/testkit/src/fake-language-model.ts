@@ -171,6 +171,8 @@ export interface TextResponseScriptOptions {
   readonly responseId: string;
   readonly deltas: readonly string[];
   readonly usage?: TokenUsage;
+  /** The finish reason the response completes with. Defaults to `"stop"`. */
+  readonly finishReason?: "content-filter" | "error" | "length" | "stop" | "unknown";
 }
 
 export function textResponseScript(options: TextResponseScriptOptions): FakeModelScript {
@@ -204,7 +206,7 @@ export function textResponseScript(options: TextResponseScriptOptions): FakeMode
       type: "response.completed",
       sequence,
       responseId: options.responseId,
-      finishReason: "stop",
+      finishReason: options.finishReason ?? "stop",
     }),
   );
 

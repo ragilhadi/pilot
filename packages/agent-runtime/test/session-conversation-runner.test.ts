@@ -232,6 +232,80 @@ describe("SessionConversationRunner", () => {
     ]);
   });
 
+  it("commits partial text and flags the turn when the model is truncated at the token limit", async () => {
+    const model = new FakeLanguageModel({
+      scripts: [
+        textResponseScript({
+          responseId: "response-1",
+          deltas: ["A partial ans"],
+          finishReason: "length",
+        }),
+      ],
+    });
+    const { sessions, conversation } = conversationHarness(model);
+    await sessions.create({
+      id: sessionId("session-1"),
+      createdAt: "2026-07-21T05:00:00.000Z",
+    });
+
+    const result = await conversation.runTurn({
+      sessionId: sessionId("session-1"),
+      text: "A long question",
+      channel: "cli",
+      modelKey: "fake/scripted",
+      request: { tools: [], maxOutputTokens: 20 },
+      retryPolicy,
+      budgetPolicy,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.assistantMessage).toMatchObject({
+      parts: [{ type: "text", text: "A partial ans" }],
+      metadata: { finishReason: "length" },
+    });
+    expect(result.incomplete).toEqual({
+      reason: "truncated",
+      finishReason: "length",
+      runId: "run-1",
+      hasPartialText: true,
+    });
+  });
+
+  it("does not throw when a terminal response carries no text, reporting it as incomplete", async () => {
+    const model = new FakeLanguageModel({
+      scripts: [
+        textResponseScript({ responseId: "response-1", deltas: [], finishReason: "length" }),
+      ],
+    });
+    const { sessions, conversation } = conversationHarness(model);
+    await sessions.create({
+      id: sessionId("session-1"),
+      createdAt: "2026-07-21T05:00:00.000Z",
+    });
+
+    const result = await conversation.runTurn({
+      sessionId: sessionId("session-1"),
+      text: "A question that yields only reasoning",
+      channel: "cli",
+      modelKey: "fake/scripted",
+      request: { tools: [], maxOutputTokens: 20 },
+      retryPolicy,
+      budgetPolicy,
+      signal: new AbortController().signal,
+    });
+
+    expect(result.assistantMessage).toBeUndefined();
+    expect(result.incomplete).toEqual({
+      reason: "truncated",
+      finishReason: "length",
+      runId: "run-1",
+      hasPartialText: false,
+    });
+    // The turn's runs are preserved and only the user message was committed (no empty assistant).
+    expect(result.runs).toHaveLength(1);
+    expect(result.session.messages.map(({ role }) => role)).toEqual(["user"]);
+  });
+
   it("consumes queued follow-ups, rebases them, and restarts with a fresh run", async () => {
     const model = new FakeLanguageModel({
       scripts: [textResponseScript({ responseId: "response-1", deltas: ["Updated answer"] })],

@@ -1,6 +1,7 @@
 import type {
   AgentMessage,
   Clock,
+  FinishReason,
   JsonValue,
   ModelStreamEvent,
   PermissionApprovalRequest,
@@ -9,6 +10,7 @@ import type {
   SessionId,
 } from "@pilotrun/core";
 import type {
+  ConversationIncomplete,
   PromptCompositionSnapshot,
   RunState,
   ToolExecutionLifecycleEvent,
@@ -70,6 +72,15 @@ export type ChatEvent =
   | ChatEventBase<
       "chat.turn.failed",
       { readonly error: SafeErrorSnapshot; readonly durationMs?: number }
+    >
+  | ChatEventBase<
+      "chat.turn.incomplete",
+      {
+        readonly reason: ConversationIncomplete["reason"];
+        readonly finishReason: FinishReason;
+        readonly hasPartialText: boolean;
+        readonly durationMs?: number;
+      }
     >
   | ChatEventBase<"chat.ended", { readonly reason: "end-of-input" | "user-exit" }>;
 
@@ -200,6 +211,9 @@ export class ChatEventRenderer {
       case "chat.turn.failed":
         this.#stderr.write(`[error: ${event.payload.error.message}]\n`);
         break;
+      case "chat.turn.incomplete":
+        this.#stderr.write(`\n${formatIncompleteNotice(event.payload)}\n`);
+        break;
       case "chat.ended":
         this.#stdout.write(`[chat ended: ${event.payload.reason}]\n`);
         break;
@@ -252,6 +266,39 @@ export function formatContextAttachmentSummary(payload: {
     parts.push(`-${file.path} (${describeSkipReason(file.reason, file.detail)})`);
   }
   return `[context: ${parts.join(", ")}]`;
+}
+
+/**
+ * Renders the warning shown when a turn ends without a clean completion — a truncated,
+ * content-filtered, errored, or empty response. The turn itself is not a failure, so this is a
+ * notice on stderr rather than an error.
+ */
+export function formatIncompleteNotice(payload: {
+  readonly reason: ConversationIncomplete["reason"];
+  readonly finishReason: FinishReason;
+  readonly hasPartialText: boolean;
+}): string {
+  const cause = describeIncompleteReason(payload.reason, payload.finishReason);
+  const tail = payload.hasPartialText
+    ? "the response above may be cut off"
+    : "no response text was returned";
+  return `[incomplete: ${cause} — ${tail}]`;
+}
+
+function describeIncompleteReason(
+  reason: ConversationIncomplete["reason"],
+  finishReason: FinishReason,
+): string {
+  switch (reason) {
+    case "truncated":
+      return "the model reached its output token limit";
+    case "content-filtered":
+      return "the response was stopped by a content filter";
+    case "model-error":
+      return `the model ended abnormally (${finishReason})`;
+    default:
+      return "the model returned an empty response";
+  }
 }
 
 function describeSkipReason(reason: string, detail: string | undefined): string {

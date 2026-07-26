@@ -1523,6 +1523,20 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       });
     }
 
+    if (turnResult.incomplete !== undefined) {
+      emit({
+        type: "chat.turn.incomplete",
+        sessionId: id,
+        runId: turnResult.incomplete.runId,
+        payload: {
+          reason: turnResult.incomplete.reason,
+          finishReason: turnResult.incomplete.finishReason,
+          hasPartialText: turnResult.incomplete.hasPartialText,
+          durationMs: turnDurationMs,
+        },
+      });
+    }
+
     if (exitRequested || inputClosed) {
       emit({
         type: "chat.ended",

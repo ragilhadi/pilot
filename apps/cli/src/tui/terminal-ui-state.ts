@@ -261,6 +261,8 @@ export function reduceTerminalUi(
       );
     case "chat.turn.failed":
       return failedState(sequencedState, event);
+    case "chat.turn.incomplete":
+      return incompleteState(sequencedState, event);
     case "chat.ended":
       return {
         ...appendNotice(sequencedState, event, "info", `Chat ended: ${event.payload.reason}`),
@@ -616,6 +618,42 @@ function failedState(
     lastTurnSummary: summary,
     blocks: [...noticed.blocks, { kind: "summary", id: `summary:${event.sequence}`, summary }],
   };
+}
+
+function incompleteState(
+  state: TerminalUiState,
+  event: Extract<ChatEvent, { type: "chat.turn.incomplete" }>,
+): TerminalUiState {
+  // A turn that ended without a clean stop (truncated, filtered, errored, or empty). It is not a
+  // hard failure — any partial answer already streamed in — so we return to "ready" and leave a
+  // warning notice rather than moving to the "failed" phase.
+  const noticed = appendNotice(state, event, "warning", incompleteNotice(event.payload));
+  return {
+    ...noticed,
+    phase: "ready",
+    queuedInputCount: 0,
+    pendingPermission: undefined,
+    currentTurnBlockStart: undefined,
+  };
+}
+
+function incompleteNotice(payload: {
+  readonly reason: "truncated" | "content-filtered" | "model-error" | "empty";
+  readonly finishReason: string;
+  readonly hasPartialText: boolean;
+}): string {
+  const cause =
+    payload.reason === "truncated"
+      ? "The model reached its output token limit"
+      : payload.reason === "content-filtered"
+        ? "The response was stopped by a content filter"
+        : payload.reason === "model-error"
+          ? `The model ended abnormally (${payload.finishReason})`
+          : "The model returned an empty response";
+  const tail = payload.hasPartialText
+    ? "the response above may be cut off"
+    : "no response text was returned";
+  return `${cause} — ${tail}.`;
 }
 
 function contextSummary(snapshot: PromptCompositionSnapshot): string {
