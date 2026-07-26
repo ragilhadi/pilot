@@ -303,4 +303,24 @@ describe("terminal UI reducer", () => {
     });
     expect(ui.state().blocks.at(-1)).toMatchObject({ kind: "summary" });
   });
+
+  it("returns to ready with a warning notice when a turn ends incomplete", () => {
+    const ui = fixture();
+    ui.dispatch({ type: "chat.started", sessionId: id, payload: { modelKey: "fake/test" } });
+    ui.submit("A long question");
+    ui.dispatch({
+      type: "chat.turn.incomplete",
+      sessionId: id,
+      runId: run,
+      payload: { reason: "truncated", finishReason: "length", hasPartialText: false },
+    });
+
+    expect(ui.state().phase).toBe("ready");
+    expect(ui.state().currentTurnBlockStart).toBeUndefined();
+    expect(ui.state().blocks.at(-1)).toMatchObject({
+      kind: "notice",
+      tone: "warning",
+      text: "The model reached its output token limit — no response text was returned.",
+    });
+  });
 });

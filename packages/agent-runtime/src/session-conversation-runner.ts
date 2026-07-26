@@ -1,6 +1,7 @@
 import {
   type AgentMessage,
   type Clock,
+  type FinishReason,
   type IdSource,
   type JsonObject,
   messageId,
@@ -52,10 +53,24 @@ export interface ConversationRunRecord {
   readonly result: ApplicationRunResult;
 }
 
+/**
+ * Describes a terminal turn that finished without a clean `stop`. The turn is not an error — its
+ * runs are preserved — but the assistant response is either absent or partial, and callers should
+ * surface why (an output-token cutoff, a content filter, a model-side error, or an empty reply).
+ */
+export interface ConversationIncomplete {
+  readonly reason: "truncated" | "content-filtered" | "model-error" | "empty";
+  readonly finishReason: FinishReason;
+  readonly runId: RunId;
+  /** Whether a partial assistant message was still committed to history. */
+  readonly hasPartialText: boolean;
+}
+
 export interface ConversationTurnResult {
   readonly session: SessionSnapshot;
   readonly runs: readonly ConversationRunRecord[];
   readonly assistantMessage?: AgentMessage;
+  readonly incomplete?: ConversationIncomplete;
 }
 
 /**
@@ -133,16 +148,20 @@ export class SessionConversationRunner {
         return Object.freeze({ session, runs: Object.freeze(runs) });
       }
 
+      const { finishReason } = result.outcome;
       const parts = result.outcome.text
         .filter(({ text }) => text.length > 0)
         .map(({ text }) => Object.freeze({ type: "text" as const, text }));
       if (parts.length === 0) {
-        throw new SessionError(
-          "PILOT_SESSION_INVALID_MESSAGE",
-          "non-terminal-message",
-          "A completed text-only model response contained no text",
-          { runId: currentRunId, sessionId: input.sessionId },
-        );
+        // A terminal response carried no committable text. This is recoverable, not fatal: the
+        // model hit its output-token budget (finishReason "length"), was content-filtered, errored
+        // mid-stream, or simply produced nothing. Preserve the turn's runs and report why instead
+        // of throwing a non-retryable SessionError that discards all of the turn's work.
+        return Object.freeze({
+          session,
+          runs: Object.freeze(runs),
+          incomplete: incompleteFor(finishReason, currentRunId, false),
+        });
       }
 
       const metadata: JsonObject = Object.freeze({
@@ -177,6 +196,11 @@ export class SessionConversationRunner {
         session,
         runs: Object.freeze(runs),
         assistantMessage,
+        // A non-"stop" finish reason means the committed text is partial — the model was cut off
+        // (typically at the output-token limit) mid-answer. Commit what it produced, but flag it.
+        ...(finishReason === "stop"
+          ? {}
+          : { incomplete: incompleteFor(finishReason, currentRunId, true) }),
       });
     }
   }
@@ -224,6 +248,33 @@ export class SessionConversationRunner {
 
   #now(): string {
     return this.#dependencies.clock.now().toISOString();
+  }
+}
+
+function incompleteFor(
+  finishReason: FinishReason,
+  currentRunId: RunId,
+  hasPartialText: boolean,
+): ConversationIncomplete {
+  return Object.freeze({
+    reason: incompleteReasonFor(finishReason),
+    finishReason,
+    runId: currentRunId,
+    hasPartialText,
+  });
+}
+
+function incompleteReasonFor(finishReason: FinishReason): ConversationIncomplete["reason"] {
+  switch (finishReason) {
+    case "length":
+      return "truncated";
+    case "content-filter":
+      return "content-filtered";
+    case "error":
+    case "unknown":
+      return "model-error";
+    default:
+      return "empty";
   }
 }
 
