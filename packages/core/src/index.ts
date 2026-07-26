@@ -103,7 +103,7 @@ export {
   type TextPart,
   type ToolCallPart,
   type ToolResultPart,
-} from "./domain/message.js";
+} from "./domain/message/index.js";
 export {
   ModelCapabilitiesSchema,
   ModelDescriptorSchema,
@@ -137,7 +137,7 @@ export {
   type ProviderConfiguration,
   type RetryPolicy,
   type TokenUsage,
-} from "./domain/model.js";
+} from "./domain/model/index.js";
 export {
   ActionFingerprintSchema,
   CommandPermissionActionSchema,
@@ -170,7 +170,7 @@ export {
   type PermissionScope,
   type ToolPermissionAction,
   type UserInteraction,
-} from "./domain/permission.js";
+} from "./domain/permission/index.js";
 export {
   defineTool,
   parseToolInput,
@@ -188,7 +188,7 @@ export {
   type ToolMetadata,
   type ToolRisk,
   type ToolSchemaOutput,
-} from "./domain/tool.js";
+} from "./domain/tool/index.js";
 export { ToolRecoverySchema, type ToolRecovery } from "./domain/recovery.js";
 export {
   builtinConfiguration,
@@ -207,4 +207,4 @@ export {
   PilotConfigurationSchema,
   resolveConfiguration,
   resolveEnvironmentReference,
-} from "./domain/configuration.js";
+} from "./domain/configuration/index.js";
