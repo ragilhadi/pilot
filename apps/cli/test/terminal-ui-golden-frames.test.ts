@@ -1,5 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
+import { summarizeToolCall } from "../src/tui/components/screen.js";
 import { activityIndicator } from "../src/tui/render-helpers.js";
 import { PilotFooter, PilotScreen } from "../src/tui/terminal-chat-presentation.js";
 import { type TerminalUiState, initialTerminalUiState } from "../src/tui/terminal-ui-state.js";
@@ -83,6 +84,53 @@ describe("terminal UI golden frames", () => {
       .join("\n");
     expect(frame).toContain("\u001b[");
     expect(frame).not.toContain("\uFFFD");
+  });
+
+  it("summarizes tool calls to one line and never inlines raw JSON when compact", () => {
+    const base = {
+      kind: "tool" as const,
+      id: "tool:x",
+      callId: "call:x",
+      commandOutput: "",
+      status: "completed" as const,
+    };
+    expect(
+      summarizeToolCall({
+        ...base,
+        name: "list_files",
+        input: { path: "apps/api/gen" },
+        output: { scannedEntries: 5 },
+      }),
+    ).toBe("apps/api/gen  ·  5 entries");
+    expect(summarizeToolCall({ ...base, name: "read_file", input: { path: "domain.ts" } })).toBe(
+      "domain.ts",
+    );
+    expect(
+      summarizeToolCall({ ...base, name: "run_command", input: { command: "pnpm test" } }),
+    ).toBe("pnpm test");
+    expect(summarizeToolCall({ ...base, name: "search_code", input: { query: "captcha" } })).toBe(
+      "query=captcha",
+    );
+
+    const state: TerminalUiState = {
+      ...goldenState,
+      blocks: [
+        {
+          ...base,
+          name: "list_files",
+          input: { path: "apps/api/gen" },
+          output: { scannedEntries: 5, entries: [{ path: "a.ts" }] },
+        },
+      ],
+    };
+    const theme = createPilotTheme(capabilities);
+    const frame = new PilotScreen(() => state, theme, capabilities, "C:/workspace/pilot")
+      .render(100)
+      .join("\n");
+    expect(frame).toContain("5 entries");
+    // Compact view shows a summary, not the raw request/response JSON.
+    expect(frame).not.toContain("scannedEntries");
+    expect(frame).not.toContain("input {");
   });
 
   it("animates the activity indicator across frames and hides it when idle", () => {

@@ -347,13 +347,62 @@ function renderFileBody(
   return lines;
 }
 
+/**
+ * A short, human-readable one-line summary of a tool call — the primary argument and, where cheap,
+ * a result metric — used for the compact transcript line and the `/tools` overlay labels. Never
+ * emits raw request/response JSON; that stays behind the detail view and the overlay.
+ */
+export function summarizeToolCall(block: ToolTranscriptBlock): string {
+  switch (block.name) {
+    case "run_command":
+      return commandLine(block.input) ?? "command";
+    case "read_file":
+    case "write_file":
+      return stringField(block.input, "path") ?? stringField(block.input, "file") ?? block.name;
+    case "list_files": {
+      const path = stringField(block.input, "path") ?? ".";
+      const count = numberField(block.output, "scannedEntries");
+      return count === undefined
+        ? path
+        : `${path}  ·  ${count} ${count === 1 ? "entry" : "entries"}`;
+    }
+    case "apply_patch":
+      return patchSummary(block.input) ?? "patch";
+    default:
+      return genericInputSummary(block.input) ?? block.name;
+  }
+}
+
+function genericInputSummary(input: JsonValue): string | undefined {
+  const record = objectValue(input);
+  if (record === undefined) return undefined;
+  if (typeof record.path === "string") return record.path;
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return `${key}=${value}`;
+    }
+  }
+  return undefined;
+}
+
+function patchSummary(input: JsonValue): string | undefined {
+  const patch = patchFromInput(input);
+  if (patch === undefined) return undefined;
+  const files = patch
+    .split("\n")
+    .filter((line) => /^\*\*\* (Add|Update|Delete) File: /u.test(line)).length;
+  return files > 0 ? `${files} file${files === 1 ? "" : "s"}` : undefined;
+}
+
 function renderGenericBody(
   block: ToolTranscriptBlock,
   width: number,
   theme: PilotTheme,
   detail: boolean,
 ): string[] {
-  if (!detail) return [];
+  if (!detail) {
+    return [truncateToWidth(theme.muted(`  ${summarizeToolCall(block)}`), width)];
+  }
   const lines = [...wrapStyled(`input ${safeJson(block.input)}`, width, 2, theme.muted)];
   if (block.output !== undefined) {
     lines.push(...wrapStyled(`output ${safeJson(block.output)}`, width, 2, theme.muted));

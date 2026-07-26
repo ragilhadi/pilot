@@ -9,7 +9,12 @@ import { type CodeBlock, extractCodeBlocks } from "./code-blocks.js";
 import { DismissableDialog, overlayOptions, SelectionDialog } from "./components/dialogs.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { PilotFooter } from "./components/footer.js";
-import { PilotScreen, type RepositoryDisplayState } from "./components/screen.js";
+import {
+  PilotScreen,
+  type RepositoryDisplayState,
+  summarizeToolCall,
+} from "./components/screen.js";
+import { formatDuration } from "./render-helpers.js";
 import { WorkspaceFileAutocompleteProvider } from "./workspace-file-autocomplete.js";
 import {
   applyPilotTheme,
@@ -22,6 +27,7 @@ import {
   initialTerminalUiState,
   reduceTerminalUi,
   type TerminalUiState,
+  type ToolTranscriptBlock,
 } from "./terminal-ui-state.js";
 
 export { PilotFooter } from "./components/footer.js";
@@ -111,6 +117,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
           { name: "context", description: "Inspect selected model context" },
           { name: "models", description: "Select the model for the next turn" },
           { name: "sessions", description: "Inspect resumable sessions" },
+          { name: "tools", description: "Inspect tool calls and their input/output" },
           { name: "copy", description: "Copy a code block to the clipboard" },
           { name: "theme", description: "Switch terminal color theme" },
           { name: "abort", description: "Cancel the active turn" },
@@ -218,6 +225,10 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#showCopyOverlay();
       return;
     }
+    if (text === "/tools") {
+      this.#showToolsOverlay();
+      return;
+    }
     this.#submissionSequence += 1;
     this.#state = reduceTerminalUi(this.#state, {
       type: "composer.submitted",
@@ -315,6 +326,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "/context     Inspect model-facing context",
         "/models      Select the model used by the next turn",
         "/sessions    Inspect sessions and resume commands",
+        "/tools       Inspect tool calls and their input/output",
         "/copy        Copy a code block to the clipboard",
         "/theme       Switch system/dark/light/high-contrast theme",
         "/abort       Cancel the active turn",
@@ -473,6 +485,51 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     dialog.onClose = () => handle.hide();
   }
 
+  /** Lists every tool call in the session; selecting one opens its full input/output. */
+  #showToolsOverlay(): void {
+    const tools = this.#state.blocks.filter(
+      (block): block is ToolTranscriptBlock => block.kind === "tool",
+    );
+    if (tools.length === 0) {
+      this.#notify("info", "No tool calls in this session yet");
+      return;
+    }
+    const items = tools.map((block, index) => ({
+      value: String(index),
+      label: `${block.name}  ${summarizeToolCall(block)}`,
+      description: `${block.status}${block.durationMs === undefined ? "" : `, ${formatDuration(block.durationMs)}`}`,
+    }));
+    const dialog = new SelectionDialog("Tool calls", items, this.#theme);
+    const handle = this.#tui.showOverlay(dialog, overlayOptions(60));
+    dialog.onSelect = (value) => {
+      handle.hide();
+      const block = tools[Number(value)];
+      if (block !== undefined) this.#showToolDetailOverlay(block);
+    };
+    dialog.onClose = () => handle.hide();
+  }
+
+  #showToolDetailOverlay(block: ToolTranscriptBlock): void {
+    const heading = `${block.name}  ${block.status}${block.durationMs === undefined ? "" : `  ${formatDuration(block.durationMs)}`}`;
+    const lines = [heading, "", "input", ...jsonLines(block.input)];
+    if (block.output !== undefined) {
+      lines.push("", "output", ...jsonLines(block.output));
+    }
+    const commandOutput = block.commandOutput.trim();
+    if (commandOutput.length > 0) {
+      lines.push("", "command output", ...commandOutput.split(/\r?\n/u));
+    }
+    const dialog = new DismissableDialog(`Tool: ${block.name}`, lines, this.#theme);
+    const handle = this.#tui.showOverlay(dialog, {
+      width: "100%",
+      minWidth: 40,
+      maxHeight: "80%",
+      anchor: "center",
+      margin: 0,
+    });
+    dialog.onClose = () => handle.hide();
+  }
+
   #showContextOverlay(snapshot: NonNullable<TerminalUiState["context"]>): void {
     const lines = [
       `Cycle ${snapshot.cycle}`,
@@ -518,5 +575,14 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     };
     dialog.onResponse = finish;
     dialog.onCancel = () => finish("deny once");
+  }
+}
+
+function jsonLines(value: unknown): string[] {
+  if (typeof value === "string") return value.split(/\r?\n/u);
+  try {
+    return JSON.stringify(value, null, 2).split("\n");
+  } catch {
+    return [String(value)];
   }
 }
