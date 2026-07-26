@@ -36,6 +36,18 @@ const permissionsLayerSchema = z
   .object({ rules: z.array(PermissionRuleSchema).max(1_000).readonly().optional() })
   .strict()
   .readonly();
+const runBudgetLayerSchema = z
+  .object({
+    maxCycles: z.number().int().positive().optional(),
+    maxModelAttempts: z.number().int().positive().optional(),
+    maxToolCalls: z.number().int().nonnegative().optional(),
+    maxElapsedMs: z.number().int().positive().optional(),
+    maxInputTokens: z.number().int().nonnegative().optional(),
+    maxOutputTokens: z.number().int().nonnegative().optional(),
+    maxEstimatedCostUsd: z.number().finite().nonnegative().optional(),
+  })
+  .strict()
+  .readonly();
 
 export const ConfigurationLayerValueSchema = z
   .object({
@@ -44,6 +56,7 @@ export const ConfigurationLayerValueSchema = z
     persistence: persistenceLayerSchema.optional(),
     context: contextLayerSchema.optional(),
     permissions: permissionsLayerSchema.optional(),
+    runBudget: runBudgetLayerSchema.optional(),
     secrets: z.record(secretAlias, EnvironmentReferenceSchema).optional(),
   })
   .strict()
@@ -82,6 +95,18 @@ export const PilotConfigurationSchema = z
       .readonly(),
     permissions: z
       .object({ rules: z.array(PermissionRuleSchema).max(1_000).readonly() })
+      .strict()
+      .readonly(),
+    runBudget: z
+      .object({
+        maxCycles: z.number().int().positive(),
+        maxModelAttempts: z.number().int().positive(),
+        maxToolCalls: z.number().int().nonnegative(),
+        maxElapsedMs: z.number().int().positive(),
+        maxInputTokens: z.number().int().nonnegative().optional(),
+        maxOutputTokens: z.number().int().nonnegative().optional(),
+        maxEstimatedCostUsd: z.number().finite().nonnegative().optional(),
+      })
       .strict()
       .readonly(),
     secrets: z.record(secretAlias, EnvironmentReferenceSchema).readonly(),
@@ -148,6 +173,17 @@ export const builtinConfiguration: PilotConfiguration = PilotConfigurationSchema
     maxToolResultBytes: 32_768,
   },
   permissions: { rules: [] },
+  runBudget: {
+    // Loop bounds are generous backstops against runaway iteration, not the
+    // normal stopping point. Wall-clock elapsed time is the primary limiter;
+    // per-request context size is bounded separately by context.maxInputTokens,
+    // so no cumulative token cap is set by default. Set maxEstimatedCostUsd (or
+    // the token caps) in config.jsonc to add an opt-in ceiling.
+    maxCycles: 200,
+    maxModelAttempts: 600,
+    maxToolCalls: 2_000,
+    maxElapsedMs: 1_800_000,
+  },
   secrets: {},
 });
 

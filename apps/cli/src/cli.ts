@@ -19,6 +19,7 @@ import {
 } from "@pilotrun/agent-runtime";
 import {
   type AgentMessage,
+  builtinConfiguration,
   type Clock,
   type IdSource,
   type JsonValue,
@@ -1391,16 +1392,13 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       modelKey: activeModelKey,
       request: { tools: tools.modelDefinitions(), maxOutputTokens: 4_096 },
       retryPolicy: { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2_000, jitterRatio: 0.2 },
-      budgetPolicy: {
-        // The MVP acceptance journey needs nine cycles: repository inspection,
-        // diagnosis, an approved patch, verification, and the final report.
-        maxCycles: 12,
-        maxModelAttempts: 24,
-        maxToolCalls: 32,
-        maxElapsedMs: 120_000,
-        maxInputTokens: 128_000,
-        maxOutputTokens: 49_152,
-      },
+      // The run budget bounds a single turn's agent loop. Cycle/attempt/tool
+      // counts are generous backstops against runaway iteration; wall-clock
+      // elapsed time is the meaningful limit. Per-request context size is
+      // bounded by context.maxInputTokens, so no cumulative token cap is set
+      // unless the user opts into one. All fields are tunable in config.jsonc.
+      budgetPolicy:
+        dependencies.configuration?.configuration.runBudget ?? builtinConfiguration.runBudget,
       signal: dependencies.signal,
       interruptionQueue: queue,
       permissionContext: {
