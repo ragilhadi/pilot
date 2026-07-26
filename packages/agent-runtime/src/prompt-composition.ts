@@ -207,6 +207,23 @@ export class ConversationModelRequestContextPreparer implements ModelRequestCont
       throw new ContextEngineError("PILOT_CONTEXT_INVALID", "Model request has no session ID");
     }
     const width = Math.max(6, String(messages.length).length);
+    // Tool exchanges (an assistant tool-call message plus its tool-result messages) must be kept or
+    // dropped as a unit, or the model rejects the request. Expand the "recent messages" mandatory
+    // window to whole exchange groups so the current exchange is never split, and reuse the grouping
+    // below to drop older, partially-fitting exchanges wholesale instead of failing the turn.
+    const groups = computeExchangeGroups(messages);
+    const mandatoryThreshold = messages.length - this.#mandatoryRecentMessages;
+    const mandatoryGroups = new Set<string>();
+    messages.forEach((message, index) => {
+      if (index >= mandatoryThreshold) {
+        const groupId = groups.groupOf.get(message.id);
+        if (groupId !== undefined) mandatoryGroups.add(groupId);
+      }
+    });
+    const isMandatory = (message: AgentMessage): boolean => {
+      const groupId = groups.groupOf.get(message.id);
+      return groupId !== undefined && mandatoryGroups.has(groupId);
+    };
     const source = {
       id: "conversation",
       priority: 1_000,
@@ -215,7 +232,7 @@ export class ConversationModelRequestContextPreparer implements ModelRequestCont
           id: `conversation:${String(index + 1).padStart(width, "0")}`,
           content: message,
           relevance: messages.length === 0 ? 1 : (index + 1) / messages.length,
-          mandatory: index >= messages.length - this.#mandatoryRecentMessages,
+          mandatory: isMandatory(message),
           provenance: {
             kind: provenanceKind(message),
             trust: message.role === "system" ? "trusted" : "untrusted",
@@ -250,10 +267,11 @@ export class ConversationModelRequestContextPreparer implements ModelRequestCont
         },
       },
     );
-    assertAtomicToolExchanges(messages, selection.selected);
+    const repaired = repairAtomicToolExchanges(selection, groups.membersByGroup, mandatoryGroups);
+    assertAtomicToolExchanges(messages, repaired.selected);
     const { messages: _messages, ...baseRequest } = input.request;
     return this.#composer.compose({
-      selection,
+      selection: repaired,
       baseRequest,
       sessionId,
       runId: input.runId,
@@ -322,6 +340,103 @@ function snapshotEntry(
     freshness: candidate.freshness.status,
     ...(modelMessageId === undefined ? {} : { messageId: modelMessageId }),
     ...(composedTokens === undefined ? {} : { composedTokens }),
+  });
+}
+
+interface ExchangeGroups {
+  /** Maps each message id to the id of the atomic tool-exchange group it belongs to. */
+  readonly groupOf: ReadonlyMap<string, string>;
+  /** Maps each group id to the ordered message ids that must be kept or dropped together. */
+  readonly membersByGroup: ReadonlyMap<string, readonly string[]>;
+}
+
+/**
+ * Partitions the conversation into atomic groups: an assistant message that issues tool calls and
+ * each of its tool-result messages form one group; every other message is its own singleton. The
+ * model rejects a request that contains a tool call without its result (or vice versa), so these
+ * groups are the unit of inclusion for budget-driven truncation.
+ */
+function computeExchangeGroups(history: readonly AgentMessage[]): ExchangeGroups {
+  const groupOf = new Map<string, string>();
+  const membersByGroup = new Map<string, string[]>();
+  const groupByCall = new Map<string, string>();
+  const assign = (id: string, groupId: string): void => {
+    groupOf.set(id, groupId);
+    const members = membersByGroup.get(groupId) ?? [];
+    if (!members.includes(id)) members.push(id);
+    membersByGroup.set(groupId, members);
+  };
+  for (const message of history) {
+    const calls = message.parts.filter((part) => part.type === "tool-call");
+    const results = message.parts.filter((part) => part.type === "tool-result");
+    if (calls.length > 0) {
+      assign(message.id, message.id);
+      for (const call of calls) {
+        groupByCall.set(`${message.runId ?? "no-run"} ${call.callId}`, message.id);
+      }
+      continue;
+    }
+    if (results.length > 0) {
+      let groupId: string | undefined;
+      for (const result of results) {
+        groupId = groupByCall.get(`${message.runId ?? "no-run"} ${result.callId}`);
+        if (groupId !== undefined) break;
+      }
+      assign(message.id, groupId ?? message.id);
+      continue;
+    }
+    assign(message.id, message.id);
+  }
+  return { groupOf, membersByGroup };
+}
+
+/**
+ * Repairs a budget-driven selection so no atomic tool exchange is left partially selected. Older,
+ * non-mandatory exchanges that only partly fit are dropped in full — graceful degradation rather
+ * than the hard failure `assertAtomicToolExchanges` would otherwise raise. A partially-fitting
+ * mandatory exchange (the current one) is a genuine over-budget condition and still throws.
+ */
+function repairAtomicToolExchanges(
+  selection: ContextSelection,
+  membersByGroup: ReadonlyMap<string, readonly string[]>,
+  mandatoryGroups: ReadonlySet<string>,
+): ContextSelection {
+  const selectedIds = new Set<string>(
+    selection.selected.flatMap(({ content }) => (typeof content === "string" ? [] : [content.id])),
+  );
+  const dropIds = new Set<string>();
+  for (const [groupId, memberIds] of membersByGroup) {
+    const selectedCount = memberIds.reduce((count, id) => count + (selectedIds.has(id) ? 1 : 0), 0);
+    if (selectedCount === 0 || selectedCount === memberIds.length) continue;
+    if (mandatoryGroups.has(groupId)) {
+      throw new ContextEngineError(
+        "PILOT_CONTEXT_BUDGET",
+        "The current tool exchange does not fit the context budget",
+        { exchangeMessages: memberIds.length, selectedMessages: selectedCount },
+      );
+    }
+    for (const id of memberIds) if (selectedIds.has(id)) dropIds.add(id);
+  }
+  if (dropIds.size === 0) return selection;
+
+  const kept: CollectedContextCandidate[] = [];
+  const dropped: CollectedContextCandidate[] = [];
+  for (const candidate of selection.selected) {
+    const id = typeof candidate.content === "string" ? undefined : candidate.content.id;
+    if (id !== undefined && dropIds.has(id)) dropped.push(candidate);
+    else kept.push(candidate);
+  }
+  const selectedTokens = kept.reduce((total, candidate) => total + candidate.estimatedTokens, 0);
+  const reason: ContextExclusionReason = "total-budget-exhausted";
+  return Object.freeze({
+    ...selection,
+    selected: Object.freeze(kept),
+    excluded: Object.freeze([
+      ...selection.excluded,
+      ...dropped.map((candidate) => Object.freeze({ candidate, reason, availableTokens: 0 })),
+    ]),
+    selectedTokens,
+    remainingTokens: selection.maximumTokens - selectedTokens,
   });
 }
 
