@@ -1,6 +1,5 @@
 import {
   CancellationError,
-  JsonValueSchema,
   type LanguageModel,
   type ModelCallContext,
   type ModelCapabilities,
@@ -14,6 +13,7 @@ import {
   parseModelRequest,
   parseModelStreamEvent,
   parseProviderConfiguration,
+  parseToolCallArguments,
   type ProviderConfiguration,
 } from "@pilotrun/core";
 import * as z from "zod";
@@ -438,24 +438,12 @@ class ChatCompletionStreamNormalizer {
       if (!state.started || state.id === undefined) {
         throw contractError("OpenAI-compatible tool call ended without an identifier and name");
       }
-      let input: unknown;
-      try {
-        input = JSON.parse(state.arguments);
-      } catch (error) {
-        throw contractError("OpenAI-compatible tool arguments were not valid JSON", error);
-      }
-      const parsed = JsonValueSchema.safeParse(input);
-      if (!parsed.success) {
-        throw new ModelContractValidationError(
-          "OpenAI-compatible tool arguments",
-          parsed.error.issues.length,
-          parsed.error,
-        );
-      }
+      // Malformed arguments are a model mistake, not a protocol violation. Emitting the call with
+      // empty input lets the tool's own schema produce a recoverable, field-level error instead of
+      // aborting the run non-retryably.
+      const { input } = parseToolCallArguments(state.arguments);
       state.completed = true;
-      events.push(
-        this.#event({ type: "tool-call.completed", callId: state.id, input: parsed.data }),
-      );
+      events.push(this.#event({ type: "tool-call.completed", callId: state.id, input }));
     }
   }
 

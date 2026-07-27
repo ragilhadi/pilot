@@ -157,6 +157,8 @@ export {
   type ToolResultContextFormatterPort,
   type ToolResultContextInput,
   type ToolResultContextPolicy,
+  type ToolResultHeadTailTruncation,
+  type ToolResultPreservedErrorTruncation,
   type ToolResultTruncationMetadata,
 } from "./tool-result-context.js";
 export {

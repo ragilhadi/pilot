@@ -57,6 +57,56 @@ describe("web_fetch tool", () => {
     expect(result.output.content).not.toContain("bad()");
   });
 
+  it.each([
+    { name: "a bare domain", url: "example.com/docs" },
+    { name: "a scheme-relative URL", url: "//example.com/docs" },
+    { name: "a Markdown autolink", url: "<https://example.com/docs>" },
+    { name: "trailing sentence punctuation", url: "https://example.com/docs." },
+    { name: "an unbalanced closing paren", url: "https://example.com/docs)" },
+  ])("normalizes $name into a fetchable URL", async ({ url }) => {
+    const requested: string[] = [];
+    const fetchImpl: FetchLike = async (target) => {
+      requested.push(target);
+      return textResponse("ok");
+    };
+    const result = await tool(fetchImpl).execute({ url }, context());
+
+    expect(requested).toEqual(["https://example.com/docs"]);
+    expect(result.output.requestedUrl).toBe("https://example.com/docs");
+  });
+
+  it("keeps balanced parentheses that belong to the path", async () => {
+    const requested: string[] = [];
+    const fetchImpl: FetchLike = async (target) => {
+      requested.push(target);
+      return textResponse("ok");
+    };
+    await tool(fetchImpl).execute({ url: "https://example.com/a_(b)" }, context());
+
+    expect(requested).toEqual(["https://example.com/a_(b)"]);
+  });
+
+  it("reports an unusable URL as an invalid argument, not a security refusal", async () => {
+    await expect(
+      tool(async () => textResponse("x")).execute({ url: "http://" }, context()),
+    ).rejects.toMatchObject({
+      code: "PILOT_WEB_FETCH_INVALID_URL",
+      safeMessage: expect.stringContaining("https://example.com/page"),
+    });
+  });
+
+  it("surfaces the HTTP status so the model can tell a 404 from a network failure", async () => {
+    const fetchImpl: FetchLike = async () =>
+      new Response("nope", { status: 404, statusText: "Not Found" });
+    await expect(
+      tool(fetchImpl).execute({ url: "https://example.com/missing" }, context()),
+    ).rejects.toMatchObject({
+      code: "PILOT_WEB_FETCH_FAILED",
+      safeMessage: "The server responded with HTTP 404 Not Found.",
+      metadata: { status: 404 },
+    });
+  });
+
   it("declares network risk and requires the network permission", () => {
     const definition = tool(async () => textResponse("x"));
     expect(definition.metadata.risk).toBe("network");
@@ -71,7 +121,7 @@ describe("web_fetch tool", () => {
     };
     await expect(
       tool(fetchImpl).execute({ url: "file:///etc/passwd" }, context()),
-    ).rejects.toMatchObject({ code: "PILOT_WEB_FETCH_BLOCKED" });
+    ).rejects.toMatchObject({ code: "PILOT_WEB_FETCH_INVALID_URL" });
     expect(called).toBe(false);
   });
 

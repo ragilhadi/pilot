@@ -5,10 +5,13 @@ export {
   type ToolRisk,
 } from "./tool-metadata.js";
 export {
+  extractSchemaIssues,
   ToolContractError,
   type ToolContractViolation,
+  type ToolSchemaIssue,
 } from "./tool-contract-error.js";
 export { defineTool } from "./define-tool.js";
+export { parseToolCallArguments, type ToolArgumentsParse } from "./tool-arguments.js";
 export {
   parseToolInput,
   parseToolOutput,

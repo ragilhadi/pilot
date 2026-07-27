@@ -71,6 +71,41 @@ describe("ToolResultContextFormatter", () => {
     expect(left.truncation).toMatchObject({ contentType: "json" });
   });
 
+  it("keeps an over-budget error envelope readable instead of slicing its code in half", () => {
+    const errorOutput = {
+      error: {
+        code: "PILOT_TOOL_INPUT_INVALID",
+        message: `The tool input did not match the schema declared by read_file. ${"detail ".repeat(100)}`,
+        retryable: false,
+        metadata: { toolName: "read_file", violation: "input", issues: ["x".repeat(500)] },
+      },
+      recovery: {
+        kind: "invalid-input",
+        action: "revise-request",
+        sideEffects: "none",
+        retryable: true,
+        message: "Revise the tool input before trying again",
+      },
+    };
+    const result = format(errorOutput, 512);
+
+    expect(result.truncated).toBe(true);
+    expect(result.serializedBytes).toBeLessThanOrEqual(512);
+    // The recovery-critical fields survive verbatim; only the optional detail is shed.
+    expect(result.output).toMatchObject({
+      error: { code: "PILOT_TOOL_INPUT_INVALID", retryable: false },
+      recovery: errorOutput.recovery,
+      pilotTruncation: { strategy: "preserve-error", untrusted: true },
+    });
+    expect(JSON.stringify(result.output)).not.toContain('"head"');
+  });
+
+  it("still head/tail truncates ordinary structured results", () => {
+    const result = format({ path: "src/main.ts", content: "x".repeat(2_000) }, 512);
+
+    expect(result.truncation?.strategy).toBe("head-tail");
+  });
+
   it("rejects unsafe policy values and metadata that cannot fit", () => {
     expect(() => new ToolResultContextFormatter({ maximumBytes: 511 })).toThrowError(
       ToolResultContextError,

@@ -158,6 +158,7 @@ export {
 } from "./todo-tools.js";
 export {
   createWebFetchTool,
+  normalizeRequestedUrl,
   WebFetchInputSchema,
   WebFetchOutputSchema,
   WebFetchToolError,

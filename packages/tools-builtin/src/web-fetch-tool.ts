@@ -46,6 +46,7 @@ export type WebFetchOutput = z.output<typeof WebFetchOutputSchema>;
 type WebFetchErrorCode =
   | "PILOT_WEB_FETCH_BLOCKED"
   | "PILOT_WEB_FETCH_FAILED"
+  | "PILOT_WEB_FETCH_INVALID_URL"
   | "PILOT_WEB_FETCH_UNSUPPORTED_CONTENT";
 
 export class WebFetchToolError extends PilotError {
@@ -54,19 +55,32 @@ export class WebFetchToolError extends PilotError {
     message: string,
     metadata: Readonly<Record<string, unknown>> = {},
     cause?: unknown,
+    /**
+     * Overrides the generic per-code text. Used where the specific reason (an HTTP status, a
+     * malformed URL) is more actionable than the category and contains nothing sensitive.
+     */
+    safeMessage?: string,
   ) {
     super({
       code,
       message,
-      safeMessage:
-        code === "PILOT_WEB_FETCH_BLOCKED"
-          ? "The requested URL is not allowed to be fetched"
-          : code === "PILOT_WEB_FETCH_UNSUPPORTED_CONTENT"
-            ? "The response was not text content that could be returned"
-            : "The web request could not be completed",
+      safeMessage: safeMessage ?? defaultSafeMessage(code),
       metadata,
       ...(cause === undefined ? {} : { cause }),
     });
+  }
+}
+
+function defaultSafeMessage(code: WebFetchErrorCode): string {
+  switch (code) {
+    case "PILOT_WEB_FETCH_BLOCKED":
+      return "The requested URL is not allowed to be fetched";
+    case "PILOT_WEB_FETCH_INVALID_URL":
+      return "The url argument is not a valid http(s) URL";
+    case "PILOT_WEB_FETCH_UNSUPPORTED_CONTENT":
+      return "The response was not text content that could be returned";
+    case "PILOT_WEB_FETCH_FAILED":
+      return "The web request could not be completed";
   }
 }
 
@@ -112,8 +126,9 @@ export function createWebFetchTool(
     execute: async (input, context) => {
       throwIfCancelled(context.signal);
       const signal = AbortSignal.any([context.signal, AbortSignal.timeout(timeoutMs)]);
+      const requestedUrl = normalizeRequestedUrl(input.url);
       const { response, finalUrl, redirected } = await followRedirects(
-        input.url,
+        requestedUrl,
         fetchImpl,
         resolveHost,
         allowPrivateHosts,
@@ -141,7 +156,7 @@ export function createWebFetchTool(
       const sanitized = sanitizeText(text);
 
       const output: WebFetchOutput = Object.freeze({
-        requestedUrl: input.url,
+        requestedUrl,
         finalUrl,
         status: response.status,
         contentType,
@@ -164,6 +179,47 @@ export function createWebFetchTool(
       };
     },
   });
+}
+
+/**
+ * Repairs the URL shapes models actually emit before any validation runs.
+ *
+ * A bare `example.com/docs` used to pass the string schema, fail `new URL`, and surface as "the
+ * requested URL is not allowed to be fetched" — a missing scheme reported as a security refusal.
+ * Markdown autolinks (`<https://…>`) and trailing sentence punctuation are the same class of
+ * mistake. Anything still unparseable afterwards gets a specific, retryable invalid-URL error.
+ */
+export function normalizeRequestedUrl(rawUrl: string): string {
+  let candidate = rawUrl.trim();
+  const autolink = /^<(.+)>$/su.exec(candidate);
+  if (autolink?.[1] !== undefined) candidate = autolink[1].trim();
+  // A URL that genuinely ends in one of these is vanishingly rare; a sentence that ends in one
+  // right after a URL is not.
+  candidate = candidate.replace(/[.,;:!?'"]+$/u, "");
+  // Only strip a closing bracket that has no opener, so real URLs keep their balanced parentheses.
+  while (/[)\]}]$/u.test(candidate) && !hasMatchingOpener(candidate)) {
+    candidate = candidate.slice(0, -1);
+  }
+  if (candidate.length === 0) {
+    throw new WebFetchToolError(
+      "PILOT_WEB_FETCH_INVALID_URL",
+      "The URL is empty",
+      { rawUrl },
+      undefined,
+      "The url argument is empty. Pass an absolute URL such as https://example.com/page.",
+    );
+  }
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/u.test(candidate)) {
+    if (candidate.startsWith("//")) return `https:${candidate}`;
+    return `https://${candidate}`;
+  }
+  return candidate;
+}
+
+function hasMatchingOpener(value: string): boolean {
+  const closer = value.at(-1);
+  const opener = closer === ")" ? "(" : closer === "]" ? "[" : "{";
+  return value.slice(0, -1).includes(opener);
 }
 
 async function followRedirects(
@@ -214,6 +270,12 @@ async function followRedirects(
         "PILOT_WEB_FETCH_FAILED",
         `The server responded with status ${response.status}`,
         { url: current, status: response.status },
+        undefined,
+        // Without the status the model cannot tell a 404 (wrong URL, pick another) from a 429
+        // (transient, worth retrying) from a network failure.
+        `The server responded with HTTP ${response.status}${
+          response.statusText === "" ? "" : ` ${response.statusText}`
+        }.`,
       );
     }
     return { response, finalUrl: current, redirected };
@@ -249,16 +311,22 @@ async function assertPublicUrl(
     url = new URL(rawUrl);
   } catch (error) {
     throw new WebFetchToolError(
-      "PILOT_WEB_FETCH_BLOCKED",
+      "PILOT_WEB_FETCH_INVALID_URL",
       "The URL is not valid",
       { rawUrl },
       error,
+      `"${rawUrl}" is not a valid URL. Pass an absolute URL including the scheme, for example ` +
+        "https://example.com/page.",
     );
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new WebFetchToolError("PILOT_WEB_FETCH_BLOCKED", "Only http and https URLs are allowed", {
-      protocol: url.protocol,
-    });
+    throw new WebFetchToolError(
+      "PILOT_WEB_FETCH_INVALID_URL",
+      "Only http and https URLs are allowed",
+      { protocol: url.protocol },
+      undefined,
+      `The scheme "${url.protocol}" is not supported. Only http:// and https:// URLs can be fetched.`,
+    );
   }
   if (url.username !== "" || url.password !== "") {
     throw new WebFetchToolError(
@@ -388,8 +456,11 @@ async function readBounded(
   } finally {
     await reader.cancel().catch(() => undefined);
   }
-  if (signal.aborted && cancelSignal.aborted) throw new CancellationError(cancelSignal.reason);
-  return { bytes: Buffer.concat(chunks, total), truncated };
+  if (cancelSignal.aborted) throw new CancellationError(cancelSignal.reason);
+  // The loop also breaks when the fetch timeout fires mid-body. Reporting that partial read as a
+  // complete response would let a model conclude it had the whole document, so flag it as
+  // truncated — the same signal it already uses to decide whether to narrow the request.
+  return { bytes: Buffer.concat(chunks, total), truncated: truncated || signal.aborted };
 }
 
 function assertTextContentType(contentType: string | null): void {

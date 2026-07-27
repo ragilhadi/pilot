@@ -217,13 +217,40 @@ describe("ModelStreamAccumulator", () => {
     }
   });
 
+  it("accepts the provider's input when the streamed arguments are malformed", () => {
+    const accumulator = new ModelStreamAccumulator();
+    accumulator.consume(start());
+    accumulator.consume({
+      type: "tool-call.started",
+      sequence: 1,
+      responseId: "response-1",
+      contentIndex: 0,
+      callId: "call-1",
+      toolName: "read_file",
+    });
+    accumulator.consume({
+      type: "tool-call.arguments.delta",
+      sequence: 2,
+      responseId: "response-1",
+      callId: "call-1",
+      delta: '{"path":',
+    });
+
+    // A truncated argument stream is a model mistake, not a protocol violation: the provider has
+    // already normalized the completed input, and failing here would end the run non-retryably.
+    expect(() =>
+      accumulator.consume({
+        type: "tool-call.completed",
+        sequence: 3,
+        responseId: "response-1",
+        callId: "call-1",
+        input: { path: "README.md" },
+      }),
+    ).not.toThrow();
+    expect(accumulator.snapshot().lastSequence).toBe(3);
+  });
+
   it.each([
-    {
-      name: "malformed JSON",
-      argumentText: '{"path":',
-      input: { path: "README.md" },
-      violation: "malformed-tool-arguments",
-    },
     {
       name: "a completed input mismatch",
       argumentText: '{"path":"one.md"}',

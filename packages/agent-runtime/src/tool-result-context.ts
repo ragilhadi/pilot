@@ -19,7 +19,7 @@ export interface ToolResultContextInput {
   readonly output: JsonValue;
 }
 
-export interface ToolResultTruncationMetadata {
+export interface ToolResultHeadTailTruncation {
   readonly schemaVersion: 1;
   readonly strategy: "head-tail";
   readonly untrusted: true;
@@ -36,6 +36,24 @@ export interface ToolResultTruncationMetadata {
     readonly message: string;
   };
 }
+
+/**
+ * Emitted when an over-budget error envelope was reduced rather than cut. Deliberately compact:
+ * on a small context budget the note itself competes with the error it describes, and the error's
+ * own `recovery` field already tells the model what to do next.
+ */
+export interface ToolResultPreservedErrorTruncation {
+  readonly schemaVersion: 1;
+  readonly strategy: "preserve-error";
+  readonly untrusted: true;
+  readonly originalBytes: number;
+  readonly omittedBytes: number;
+  readonly omittedDetail: "metadata" | "metadata-and-message";
+}
+
+export type ToolResultTruncationMetadata =
+  | ToolResultHeadTailTruncation
+  | ToolResultPreservedErrorTruncation;
 
 export interface FormattedToolResultContext {
   readonly output: JsonValue;
@@ -88,6 +106,13 @@ export class ToolResultContextFormatter implements ToolResultContextFormatterPor
         serializedBytes: originalMessageBytes,
       });
     }
+
+    // A tool error is the one result the model must be able to read in full: its code and recovery
+    // hint are what tell it whether and how to retry. Head/tail truncation slices the code in half
+    // ("PILOT_TOOL_INPU"), turning a recoverable failure into an unreadable one, so shed the
+    // optional detail instead and keep the recovery-critical fields intact.
+    const preserved = boundErrorEnvelope(output, this.#maximumBytes);
+    if (preserved !== undefined) return preserved;
 
     const contentType = typeof output === "string" ? "text" : "json";
     const content = typeof output === "string" ? output : canonicalJson(output);
@@ -152,6 +177,80 @@ export class ToolResultContextFormatter implements ToolResultContextFormatterPor
   }
 }
 
+/**
+ * Rebuilds an over-budget error envelope by dropping its optional detail — metadata first, then the
+ * message text — while keeping `error.code`, `error.retryable`, and `recovery` verbatim. Returns
+ * undefined when the output is not an error envelope, or when even the minimal form does not fit,
+ * in which case the caller falls back to generic truncation.
+ */
+function boundErrorEnvelope(
+  output: JsonValue,
+  maximumBytes: number,
+): FormattedToolResultContext | undefined {
+  if (typeof output !== "object" || output === null || Array.isArray(output)) return undefined;
+  const envelope = output as JsonObject;
+  const error = envelope.error;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) return undefined;
+  const errorObject = error as JsonObject;
+  if (typeof errorObject.code !== "string") return undefined;
+
+  const originalBytes = utf8Bytes(canonicalJson(output));
+  const fullMessage = typeof errorObject.message === "string" ? errorObject.message : "";
+  const { metadata: _metadata, message: _message, ...requiredError } = errorObject;
+
+  const assemble = (
+    message: string,
+    omittedDetail: ToolResultPreservedErrorTruncation["omittedDetail"],
+  ): JsonObject => {
+    const reduced: JsonObject = Object.freeze({
+      ...envelope,
+      error: Object.freeze({ ...requiredError, message }),
+    });
+    const retainedBytes = utf8Bytes(canonicalJson(reduced));
+    return Object.freeze({
+      ...reduced,
+      pilotTruncation: Object.freeze({
+        schemaVersion: 1,
+        strategy: "preserve-error",
+        untrusted: true,
+        originalBytes,
+        omittedBytes: Math.max(0, originalBytes - retainedBytes),
+        omittedDetail,
+      }) as unknown as JsonValue,
+    });
+  };
+
+  // Shed the optional detail in order of expendability: structured metadata first, then the prose
+  // message. The code, retryable flag, and recovery hint are never dropped.
+  const withoutMetadata = assemble(fullMessage, "metadata");
+  const withoutMetadataBytes = serializedBytes(withoutMetadata);
+  if (withoutMetadataBytes <= maximumBytes) {
+    return Object.freeze({
+      output: withoutMetadata,
+      truncated: true,
+      serializedBytes: withoutMetadataBytes,
+      truncation: readTruncationMetadata(withoutMetadata.pilotTruncation),
+    });
+  }
+
+  const characters = [...fullMessage];
+  const fitting = maximumFittingCount(
+    characters.length,
+    (count) =>
+      serializedBytes(assemble(characters.slice(0, count).join(""), "metadata-and-message")) <=
+      maximumBytes,
+  );
+  const shortened = assemble(characters.slice(0, fitting).join(""), "metadata-and-message");
+  const shortenedBytes = serializedBytes(shortened);
+  if (shortenedBytes > maximumBytes) return undefined;
+  return Object.freeze({
+    output: shortened,
+    truncated: true,
+    serializedBytes: shortenedBytes,
+    truncation: readTruncationMetadata(shortened.pilotTruncation),
+  });
+}
+
 interface TruncationMeasurements {
   readonly contentType: "json" | "text";
   readonly maximumBytes: number;
@@ -185,7 +284,10 @@ function readTruncationMetadata(value: JsonValue | undefined): ToolResultTruncat
     throw new ToolResultContextError("Tool-result truncation metadata was malformed");
   }
   const object = value as JsonObject;
-  if (object.schemaVersion !== 1 || object.strategy !== "head-tail") {
+  if (
+    object.schemaVersion !== 1 ||
+    (object.strategy !== "head-tail" && object.strategy !== "preserve-error")
+  ) {
     throw new ToolResultContextError("Tool-result truncation metadata was malformed");
   }
   return object as unknown as ToolResultTruncationMetadata;

@@ -184,6 +184,39 @@ describe("OpenAICompatibleLanguageModel", () => {
     expect(events[5]).toMatchObject({ finishReason: "tool-calls" });
   });
 
+  it("treats empty tool arguments as an empty object rather than failing the run", async () => {
+    // Smaller models routinely emit "" for a zero-parameter tool. This used to abort the whole
+    // stream with a non-retryable contract error.
+    const fetch: Fetch = async () =>
+      streamResponse(await fixture("tool-response-empty-arguments.sse"), 11);
+
+    const events = await collect(createModel(fetch));
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "response.started",
+      "tool-call.started",
+      "tool-call.completed",
+      "response.completed",
+    ]);
+    expect(events[2]).toMatchObject({ callId: "call-todo", input: {} });
+  });
+
+  it("recovers from unparseable tool arguments so the tool schema can report the problem", async () => {
+    const fetch: Fetch = async () =>
+      streamResponse(await fixture("tool-response-malformed-arguments.sse"), 11);
+
+    const events = await collect(createModel(fetch));
+
+    expect(events.map(({ type }) => type)).toEqual([
+      "response.started",
+      "tool-call.started",
+      "tool-call.arguments.delta",
+      "tool-call.completed",
+      "response.completed",
+    ]);
+    expect(events[3]).toMatchObject({ callId: "call-read", input: {} });
+  });
+
   it("fails before transport when an environment credential is missing", async () => {
     const fetch = vi.fn<Fetch>();
     const model = createModel(fetch, () => undefined);
