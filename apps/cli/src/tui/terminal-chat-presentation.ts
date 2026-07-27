@@ -9,7 +9,12 @@ import { type CodeBlock, extractCodeBlocks } from "./code-blocks.js";
 import { DismissableDialog, overlayOptions, SelectionDialog } from "./components/dialogs.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { PilotFooter } from "./components/footer.js";
-import { PilotScreen, type RepositoryDisplayState } from "./components/screen.js";
+import {
+  PilotScreen,
+  type RepositoryDisplayState,
+  summarizeToolCall,
+} from "./components/screen.js";
+import { formatDuration } from "./render-helpers.js";
 import { WorkspaceFileAutocompleteProvider } from "./workspace-file-autocomplete.js";
 import {
   applyPilotTheme,
@@ -22,6 +27,7 @@ import {
   initialTerminalUiState,
   reduceTerminalUi,
   type TerminalUiState,
+  type ToolTranscriptBlock,
 } from "./terminal-ui-state.js";
 
 export { PilotFooter } from "./components/footer.js";
@@ -36,6 +42,10 @@ export interface TerminalChatPresentationOptions {
   readonly themeMode?: PilotThemeMode;
   readonly models?: readonly ModelDisplayState[];
   readonly sessions?: readonly SessionDisplayState[];
+  /** Monotonic clock for the activity animation's elapsed time. Injectable for tests. */
+  readonly now?: () => number;
+  /** Frame interval for the activity animation, in milliseconds. */
+  readonly activityIntervalMs?: number;
 }
 
 export interface ModelDisplayState {
@@ -71,6 +81,11 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   #lastIdleInterruptAt = Number.NEGATIVE_INFINITY;
   #themeMode: PilotThemeMode;
   #noticeSequence = 0;
+  readonly #now: () => number;
+  readonly #activityIntervalMs: number;
+  #activityTimer: ReturnType<typeof setInterval> | undefined;
+  #activityFrame = 0;
+  #activityStartedAt = 0;
 
   constructor(options: TerminalChatPresentationOptions) {
     this.#terminal = options.terminal;
@@ -80,6 +95,8 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     this.#models = options.models ?? [];
     this.#sessions = options.sessions ?? [];
     this.#workspacePath = options.workspacePath;
+    this.#now = options.now ?? (() => performance.now());
+    this.#activityIntervalMs = options.activityIntervalMs ?? 120;
     this.#tui = new TUI(options.terminal);
     this.#screen = new PilotScreen(
       () => this.#state,
@@ -87,6 +104,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       options.capabilities,
       this.#workspacePath,
       options.repository,
+      () => this.#activitySnapshot(),
     );
     this.#editor = new Editor(this.#tui, this.#theme.editor, {
       paddingX: options.capabilities.columns >= 80 ? 1 : 0,
@@ -99,6 +117,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
           { name: "context", description: "Inspect selected model context" },
           { name: "models", description: "Select the model for the next turn" },
           { name: "sessions", description: "Inspect resumable sessions" },
+          { name: "tools", description: "Inspect tool calls and their input/output" },
           { name: "copy", description: "Copy a code block to the clipboard" },
           { name: "theme", description: "Switch terminal color theme" },
           { name: "abort", description: "Cancel the active turn" },
@@ -127,7 +146,37 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     if (event.type === "chat.context" && event.payload.snapshot !== undefined) {
       this.#showContextOverlay(event.payload.snapshot);
     }
+    this.#syncActivity();
     this.#tui.requestRender();
+  }
+
+  /**
+   * Runs a lightweight frame timer while the model is streaming or a tool is running so the activity
+   * indicator animates even when no output events arrive (e.g. long hidden reasoning). The timer is
+   * torn down as soon as the UI goes idle, and never keeps the process alive.
+   */
+  #syncActivity(): void {
+    const busy = this.#state.phase === "streaming" || this.#state.phase === "running-tool";
+    if (busy && this.#activityTimer === undefined) {
+      this.#activityFrame = 0;
+      this.#activityStartedAt = this.#now();
+      this.#activityTimer = setInterval(() => {
+        this.#activityFrame += 1;
+        this.#tui.requestRender();
+      }, this.#activityIntervalMs);
+      this.#activityTimer.unref?.();
+    } else if (!busy && this.#activityTimer !== undefined) {
+      clearInterval(this.#activityTimer);
+      this.#activityTimer = undefined;
+    }
+  }
+
+  #activitySnapshot(): { readonly frame: number; readonly elapsedMs: number } | undefined {
+    if (this.#activityTimer === undefined) return undefined;
+    return {
+      frame: this.#activityFrame,
+      elapsedMs: Math.max(0, this.#now() - this.#activityStartedAt),
+    };
   }
 
   get themeMode(): PilotThemeMode {
@@ -144,6 +193,10 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+    if (this.#activityTimer !== undefined) {
+      clearInterval(this.#activityTimer);
+      this.#activityTimer = undefined;
+    }
     this.#terminal.setProgress(false);
     this.#terminal.setTitle("");
     this.#tui.stop();
@@ -170,6 +223,10 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     }
     if (text === "/copy") {
       this.#showCopyOverlay();
+      return;
+    }
+    if (text === "/tools") {
+      this.#showToolsOverlay();
       return;
     }
     this.#submissionSequence += 1;
@@ -224,6 +281,11 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#tui.requestRender();
       return { consume: true };
     }
+    if (matchesKey(data, Key.ctrl("t"))) {
+      this.#state = reduceTerminalUi(this.#state, { type: "ui.toggle-thinking" });
+      this.#tui.requestRender(true);
+      return { consume: true };
+    }
     if (matchesKey(data, Key.ctrl("r"))) {
       this.#showHistoryOverlay();
       return { consume: true };
@@ -255,6 +317,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "@path        Attach a file as context (ignored files are skipped)",
         "Esc          Close dialog or cancel active turn",
         "Ctrl+O       Toggle detailed tool output",
+        "Ctrl+T       Toggle model thinking (reasoning)",
         "Ctrl+Y       Copy a code block (empty composer)",
         "Ctrl+L       Redraw terminal",
         "Ctrl+C       Cancel, clear, then exit on second idle press",
@@ -263,6 +326,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "/context     Inspect model-facing context",
         "/models      Select the model used by the next turn",
         "/sessions    Inspect sessions and resume commands",
+        "/tools       Inspect tool calls and their input/output",
         "/copy        Copy a code block to the clipboard",
         "/theme       Switch system/dark/light/high-contrast theme",
         "/abort       Cancel the active turn",
@@ -421,6 +485,51 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     dialog.onClose = () => handle.hide();
   }
 
+  /** Lists every tool call in the session; selecting one opens its full input/output. */
+  #showToolsOverlay(): void {
+    const tools = this.#state.blocks.filter(
+      (block): block is ToolTranscriptBlock => block.kind === "tool",
+    );
+    if (tools.length === 0) {
+      this.#notify("info", "No tool calls in this session yet");
+      return;
+    }
+    const items = tools.map((block, index) => ({
+      value: String(index),
+      label: `${block.name}  ${summarizeToolCall(block)}`,
+      description: `${block.status}${block.durationMs === undefined ? "" : `, ${formatDuration(block.durationMs)}`}`,
+    }));
+    const dialog = new SelectionDialog("Tool calls", items, this.#theme);
+    const handle = this.#tui.showOverlay(dialog, overlayOptions(60));
+    dialog.onSelect = (value) => {
+      handle.hide();
+      const block = tools[Number(value)];
+      if (block !== undefined) this.#showToolDetailOverlay(block);
+    };
+    dialog.onClose = () => handle.hide();
+  }
+
+  #showToolDetailOverlay(block: ToolTranscriptBlock): void {
+    const heading = `${block.name}  ${block.status}${block.durationMs === undefined ? "" : `  ${formatDuration(block.durationMs)}`}`;
+    const lines = [heading, "", "input", ...jsonLines(block.input)];
+    if (block.output !== undefined) {
+      lines.push("", "output", ...jsonLines(block.output));
+    }
+    const commandOutput = block.commandOutput.trim();
+    if (commandOutput.length > 0) {
+      lines.push("", "command output", ...commandOutput.split(/\r?\n/u));
+    }
+    const dialog = new DismissableDialog(`Tool: ${block.name}`, lines, this.#theme);
+    const handle = this.#tui.showOverlay(dialog, {
+      width: "100%",
+      minWidth: 40,
+      maxHeight: "80%",
+      anchor: "center",
+      margin: 0,
+    });
+    dialog.onClose = () => handle.hide();
+  }
+
   #showContextOverlay(snapshot: NonNullable<TerminalUiState["context"]>): void {
     const lines = [
       `Cycle ${snapshot.cycle}`,
@@ -466,5 +575,14 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     };
     dialog.onResponse = finish;
     dialog.onCancel = () => finish("deny once");
+  }
+}
+
+function jsonLines(value: unknown): string[] {
+  if (typeof value === "string") return value.split(/\r?\n/u);
+  try {
+    return JSON.stringify(value, null, 2).split("\n");
+  } catch {
+    return [String(value)];
   }
 }

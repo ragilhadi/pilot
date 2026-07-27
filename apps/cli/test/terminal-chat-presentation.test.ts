@@ -228,6 +228,118 @@ describe("terminal chat presentation", () => {
     expect(terminal.output).toContain("Safe output");
   });
 
+  it("animates the activity indicator while streaming and stops it when the turn ends", async () => {
+    const terminal = new FakeTerminal();
+    let clock = 0;
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities,
+      workspacePath: "C:/workspace/pilot",
+      now: () => clock,
+      activityIntervalMs: 5,
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-22T12:00:00.000Z") });
+    const id = sessionId("session-activity");
+    const run = runId("run-activity");
+    presentation.render(
+      factory.create({ type: "chat.started", sessionId: id, payload: { modelKey: "fake/test" } }),
+    );
+    clock = 2_000;
+    presentation.render(
+      factory.create({
+        type: "model.stream",
+        sessionId: id,
+        runId: run,
+        payload: { event: { type: "response.started", sequence: 0, responseId: "response-a" } },
+      }),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(terminal.output).toContain("Thinking");
+
+    terminal.output = "";
+    presentation.render(
+      factory.create({
+        type: "model.stream",
+        sessionId: id,
+        runId: run,
+        payload: {
+          event: {
+            type: "response.completed",
+            sequence: 1,
+            responseId: "response-a",
+            finishReason: "stop",
+          },
+        },
+      }),
+    );
+
+    // Once idle the timer is torn down, so no further frames are written.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const afterIdle = terminal.output;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(terminal.output).toBe(afterIdle);
+  });
+
+  it("opens a /tools overlay listing tool calls with compact summaries", async () => {
+    const terminal = new FakeTerminal();
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities,
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-22T12:00:00.000Z") });
+    const id = sessionId("session-tools");
+    const run = runId("run-tools");
+    presentation.render(
+      factory.create({ type: "chat.started", sessionId: id, payload: { modelKey: "fake/test" } }),
+    );
+    presentation.render(
+      factory.create({
+        type: "tool.execution",
+        sessionId: id,
+        runId: run,
+        payload: {
+          event: {
+            type: "tool.started",
+            runId: "run-tools",
+            callId: "call-1",
+            toolName: "list_files",
+            input: { path: "apps/api/gen" },
+          },
+        },
+      }),
+    );
+    presentation.render(
+      factory.create({
+        type: "tool.execution",
+        sessionId: id,
+        runId: run,
+        payload: {
+          event: {
+            type: "tool.completed",
+            runId: "run-tools",
+            callId: "call-1",
+            toolName: "list_files",
+            output: { scannedEntries: 5 },
+            isError: false,
+          },
+        },
+      }),
+    );
+
+    // Typing the /tools command opens the overlay locally without sending a prompt.
+    for (const character of "/tools") terminal.input(character);
+    terminal.input("\r");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(terminal.output).toContain("Tool calls");
+    expect(terminal.output).toContain("list_files");
+    expect(terminal.output).toContain("5 entries");
+  });
+
   it("denies once when a permission dialog is cancelled", async () => {
     const terminal = new FakeTerminal();
     const presentation = new TerminalChatPresentation({

@@ -1,5 +1,7 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
+import { summarizeToolCall } from "../src/tui/components/screen.js";
+import { activityIndicator } from "../src/tui/render-helpers.js";
 import { PilotFooter, PilotScreen } from "../src/tui/terminal-chat-presentation.js";
 import { type TerminalUiState, initialTerminalUiState } from "../src/tui/terminal-ui-state.js";
 import { createPilotTheme, pilotThemeModes } from "../src/tui/theme.js";
@@ -82,6 +84,148 @@ describe("terminal UI golden frames", () => {
       .join("\n");
     expect(frame).toContain("\u001b[");
     expect(frame).not.toContain("\uFFFD");
+  });
+
+  it("summarizes tool calls to one line and never inlines raw JSON when compact", () => {
+    const base = {
+      kind: "tool" as const,
+      id: "tool:x",
+      callId: "call:x",
+      commandOutput: "",
+      status: "completed" as const,
+    };
+    expect(
+      summarizeToolCall({
+        ...base,
+        name: "list_files",
+        input: { path: "apps/api/gen" },
+        output: { scannedEntries: 5 },
+      }),
+    ).toBe("apps/api/gen  ·  5 entries");
+    expect(summarizeToolCall({ ...base, name: "read_file", input: { path: "domain.ts" } })).toBe(
+      "domain.ts",
+    );
+    expect(
+      summarizeToolCall({ ...base, name: "run_command", input: { command: "pnpm test" } }),
+    ).toBe("pnpm test");
+    expect(summarizeToolCall({ ...base, name: "search_code", input: { query: "captcha" } })).toBe(
+      "query=captcha",
+    );
+
+    const state: TerminalUiState = {
+      ...goldenState,
+      blocks: [
+        {
+          ...base,
+          name: "list_files",
+          input: { path: "apps/api/gen" },
+          output: { scannedEntries: 5, entries: [{ path: "a.ts" }] },
+        },
+      ],
+    };
+    const theme = createPilotTheme(capabilities);
+    const frame = new PilotScreen(() => state, theme, capabilities, "C:/workspace/pilot")
+      .render(100)
+      .join("\n");
+    expect(frame).toContain("5 entries");
+    // Compact view shows a summary, not the raw request/response JSON.
+    expect(frame).not.toContain("scannedEntries");
+    expect(frame).not.toContain("input {");
+  });
+
+  it("animates the activity indicator across frames and hides it when idle", () => {
+    expect(activityIndicator("ready", 0, 0, true)).toBeUndefined();
+    expect(activityIndicator("streaming", 0, 0, true)).toBe("⠋ Thinking");
+    expect(activityIndicator("streaming", 1, 0, true)).toBe("⠙ Thinking.");
+    expect(activityIndicator("streaming", 3, 0, true)).toBe("⠸ Thinking...");
+    // Frames wrap around the spinner (10) and dot (4) cycles independently.
+    expect(activityIndicator("streaming", 10, 0, true)).toBe("⠋ Thinking..");
+    expect(activityIndicator("running-tool", 0, 4_200, false)).toBe("| Working  4.2s");
+    // Elapsed time is only shown once at least a second has passed.
+    expect(activityIndicator("streaming", 0, 400, true)).toBe("⠋ Thinking");
+  });
+
+  it("renders the animated activity line while streaming and drops it when idle", () => {
+    const streaming: TerminalUiState = {
+      ...goldenState,
+      phase: "streaming",
+      blocks: [
+        {
+          kind: "assistant",
+          id: "assistant:streaming",
+          responseId: "response:streaming",
+          text: "",
+          status: "streaming",
+        },
+      ],
+    };
+    const theme = createPilotTheme(capabilities);
+    const busy = new PilotScreen(
+      () => streaming,
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+      undefined,
+      () => ({ frame: 2, elapsedMs: 3_000 }),
+    )
+      .render(100)
+      .join("\n");
+    const idle = new PilotScreen(
+      () => streaming,
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+      undefined,
+      () => undefined,
+    )
+      .render(100)
+      .join("\n");
+
+    expect(busy).toContain("Thinking");
+    expect(busy).toContain("3.0s");
+    // The inline "working" suffix is gone; the animated line is the single indicator.
+    expect(busy).not.toContain("● working");
+    expect(idle).not.toContain("Thinking");
+  });
+
+  it("renders assistant reasoning only when thinking is toggled on", () => {
+    const state: TerminalUiState = {
+      ...goldenState,
+      blocks: [
+        {
+          kind: "assistant",
+          id: "assistant:reasoning",
+          responseId: "response:reasoning",
+          text: "The answer is 42.",
+          reasoning: "First I consider the constraints, then I derive the result.",
+          status: "completed",
+        },
+      ],
+    };
+    const theme = createPilotTheme(capabilities);
+    const hidden = new PilotScreen(
+      () => ({ ...state, showThinking: false }),
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+    )
+      .render(100)
+      .join("\n");
+    const shown = new PilotScreen(
+      () => ({ ...state, showThinking: true }),
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+    )
+      .render(100)
+      .join("\n");
+
+    expect(hidden).not.toContain("thinking");
+    expect(hidden).not.toContain("derive the result");
+    expect(hidden).toContain("The answer is 42.");
+    expect(shown).toContain("thinking");
+    expect(shown).toContain("derive the result");
+    expect(shown).toContain("The answer is 42.");
   });
 
   it("frames fenced code blocks with a language label and stays width-safe", () => {

@@ -23,6 +23,8 @@ export interface AssistantTranscriptBlock {
   readonly id: string;
   readonly responseId: string;
   readonly text: string;
+  /** Accumulated reasoning ("thinking") deltas. Rendered only when `showThinking` is enabled. */
+  readonly reasoning?: string;
   readonly status: "streaming" | "completed" | "failed" | "aborted";
 }
 
@@ -103,6 +105,7 @@ export interface TerminalUiState {
   readonly queuedInputCount: number;
   readonly pendingPermission: PermissionApprovalRequest | undefined;
   readonly showToolDetails: boolean;
+  readonly showThinking: boolean;
   readonly currentTurnBlockStart: number | undefined;
   readonly lastTurnSummary: TurnSummary | undefined;
   readonly context?: PromptCompositionSnapshot;
@@ -113,6 +116,7 @@ export type TerminalUiAction =
   | { readonly type: "chat.event"; readonly event: ChatEvent }
   | { readonly type: "composer.submitted"; readonly id: string; readonly text: string }
   | { readonly type: "ui.toggle-tool-details" }
+  | { readonly type: "ui.toggle-thinking" }
   | {
       readonly type: "ui.notice";
       readonly id: string;
@@ -129,6 +133,7 @@ export const initialTerminalUiState: TerminalUiState = Object.freeze({
   queuedInputCount: 0,
   pendingPermission: undefined,
   showToolDetails: false,
+  showThinking: false,
   currentTurnBlockStart: undefined,
   lastTurnSummary: undefined,
 });
@@ -139,6 +144,9 @@ export function reduceTerminalUi(
 ): TerminalUiState {
   if (action.type === "ui.toggle-tool-details") {
     return { ...state, showToolDetails: !state.showToolDetails };
+  }
+  if (action.type === "ui.toggle-thinking") {
+    return { ...state, showThinking: !state.showThinking };
   }
   if (action.type === "ui.notice") {
     return {
@@ -301,6 +309,16 @@ function reduceModelEvent(
       blocks: updateAssistant(state.blocks, event.responseId, (block) => ({
         ...block,
         text: block.text + event.delta,
+      })),
+    };
+  }
+  if (event.type === "reasoning.delta") {
+    return {
+      ...state,
+      phase: "streaming",
+      blocks: updateAssistant(state.blocks, event.responseId, (block) => ({
+        ...block,
+        reasoning: (block.reasoning ?? "") + event.delta,
       })),
     };
   }

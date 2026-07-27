@@ -21,6 +21,9 @@ function fixture() {
     submit(text: string) {
       state = reduceTerminalUi(state, { type: "composer.submitted", id: "local:1", text });
     },
+    toggleThinking() {
+      state = reduceTerminalUi(state, { type: "ui.toggle-thinking" });
+    },
   };
 }
 
@@ -105,6 +108,58 @@ describe("terminal UI reducer", () => {
         { kind: "assistant", responseId: "response-1", text: "Hello", status: "streaming" },
       ],
     });
+  });
+
+  it("accumulates reasoning deltas onto the assistant block and toggles thinking visibility", () => {
+    const ui = fixture();
+    ui.dispatch({ type: "chat.started", sessionId: id, payload: { modelKey: "fake/test" } });
+    ui.submit("Think, then answer");
+    ui.dispatch({
+      type: "model.stream",
+      sessionId: id,
+      runId: run,
+      payload: { event: { type: "response.started", sequence: 0, responseId: "response-1" } },
+    });
+    ui.dispatch({
+      type: "model.stream",
+      sessionId: id,
+      runId: run,
+      payload: {
+        event: {
+          type: "reasoning.delta",
+          sequence: 1,
+          responseId: "response-1",
+          contentIndex: 0,
+          delta: "Weighing the options",
+        },
+      },
+    });
+    ui.dispatch({
+      type: "model.stream",
+      sessionId: id,
+      runId: run,
+      payload: {
+        event: {
+          type: "text.delta",
+          sequence: 2,
+          responseId: "response-1",
+          contentIndex: 0,
+          delta: "Answer",
+        },
+      },
+    });
+
+    expect(ui.state().blocks.at(-1)).toMatchObject({
+      kind: "assistant",
+      reasoning: "Weighing the options",
+      text: "Answer",
+    });
+    expect(ui.state().showThinking).toBe(false);
+
+    ui.toggleThinking();
+    expect(ui.state().showThinking).toBe(true);
+    ui.toggleThinking();
+    expect(ui.state().showThinking).toBe(false);
   });
 
   it("correlates tool lifecycle and streamed command output", () => {

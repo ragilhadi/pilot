@@ -1385,12 +1385,25 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
 
     const queue = new RunInterruptionQueue();
     const turnStartedAt = dependencies.monotonicNow?.() ?? performance.now();
+    // Resolve the per-response output-token cap: an explicit config override wins, otherwise the
+    // active model's declared capability, otherwise omit it entirely so the model uses its own
+    // default. A hardcoded cap previously starved reasoning models, which spend that budget on
+    // hidden thinking and can emit no text before hitting the limit.
+    const activeCapabilities = dependencies.registry.has(activeModelKey)
+      ? dependencies.registry.resolve(activeModelKey).descriptor.capabilities
+      : undefined;
+    const maxOutputTokens =
+      dependencies.configuration?.configuration.model.maxOutputTokens ??
+      activeCapabilities?.maxOutputTokens;
     const turn = conversation.runTurn({
       sessionId: id,
       text: mentionContext.augmentedText,
       channel: "cli",
       modelKey: activeModelKey,
-      request: { tools: tools.modelDefinitions(), maxOutputTokens: 4_096 },
+      request: {
+        tools: tools.modelDefinitions(),
+        ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+      },
       retryPolicy: { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2_000, jitterRatio: 0.2 },
       // The run budget bounds a single turn's agent loop. Cycle/attempt/tool
       // counts are generous backstops against runaway iteration; wall-clock

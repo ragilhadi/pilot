@@ -928,7 +928,7 @@ describe("pilot chat", () => {
     const base = cliDependencies(
       registry,
       new AbortController().signal,
-      timedLines([{ line: "Work" }, { line: "/context", delayMs: 30 }, {}]),
+      timedLines([{ line: "Work" }, { line: "/context", delayMs: 200 }, {}]),
     );
     const instructionDiscovery = new InstructionDiscovery({
       async read(request) {

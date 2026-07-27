@@ -82,6 +82,43 @@ export function phaseLabel(phase: TerminalUiPhase, unicode: boolean): string {
   return `${marker} ${phase.replace("-", " ")}`;
 }
 
+const activitySpinnerUnicode = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
+const activitySpinnerAscii = ["|", "/", "-", "\\"] as const;
+
+/** The verb shown by the activity indicator for a busy phase, or `undefined` when the UI is idle. */
+export function activityLabel(phase: TerminalUiPhase): string | undefined {
+  switch (phase) {
+    case "streaming":
+      return "Thinking";
+    case "running-tool":
+      return "Working";
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * A single-line animated activity indicator — spinner, verb, cycling dots, and elapsed time — shown
+ * while the model is streaming or a tool is running. `frame` advances on a timer so the spinner and
+ * dots move even while the model produces no output (e.g. long hidden reasoning). Returns
+ * `undefined` for idle phases so callers can omit the line entirely.
+ */
+export function activityIndicator(
+  phase: TerminalUiPhase,
+  frame: number,
+  elapsedMs: number,
+  unicode: boolean,
+): string | undefined {
+  const label = activityLabel(phase);
+  if (label === undefined) return undefined;
+  const frames = unicode ? activitySpinnerUnicode : activitySpinnerAscii;
+  const step = Math.max(0, Math.trunc(frame));
+  const spinner = frames[step % frames.length];
+  const dots = ".".repeat(step % 4);
+  const elapsed = elapsedMs >= 1_000 ? `  ${formatDuration(elapsedMs)}` : "";
+  return `${spinner} ${label}${dots}${elapsed}`;
+}
+
 export function patchFromInput(input: unknown): string | undefined {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return undefined;
   const patch = (input as Readonly<Record<string, unknown>>).patch;

@@ -4,6 +4,7 @@ import type { JsonValue } from "@pilotrun/core";
 import type { TerminalCapabilitySnapshot } from "../../presentation/presentation-mode.js";
 import { sanitizeTerminalText } from "../../presentation/sanitize-terminal-text.js";
 import {
+  activityIndicator,
   formatDuration,
   patchFromInput,
   previewLines,
@@ -24,12 +25,19 @@ export interface RepositoryDisplayState {
   readonly dirty: boolean;
 }
 
+/** A snapshot of the running activity animation, advanced by the presentation's timer. */
+export interface ActivitySnapshot {
+  readonly frame: number;
+  readonly elapsedMs: number;
+}
+
 export class PilotScreen implements Component {
   readonly #state: () => TerminalUiState;
   readonly #theme: PilotTheme;
   readonly #capabilities: TerminalCapabilitySnapshot;
   readonly #workspacePath: string;
   readonly #repository: RepositoryDisplayState | undefined;
+  readonly #activity: () => ActivitySnapshot | undefined;
   readonly #blockCache = new Map<
     string,
     { readonly block: TranscriptBlock; readonly lines: readonly string[] }
@@ -41,12 +49,14 @@ export class PilotScreen implements Component {
     capabilities: TerminalCapabilitySnapshot,
     workspacePath: string,
     repository?: RepositoryDisplayState,
+    activity?: () => ActivitySnapshot | undefined,
   ) {
     this.#state = state;
     this.#theme = theme;
     this.#capabilities = capabilities;
     this.#workspacePath = workspacePath;
     this.#repository = repository;
+    this.#activity = activity ?? (() => undefined);
   }
 
   invalidate(): void {
@@ -75,7 +85,10 @@ export class PilotScreen implements Component {
         const divider = this.#capabilities.unicode ? "┄" : "-";
         lines.push(this.#theme.muted(divider.repeat(Math.min(Math.max(1, width), 32))), "");
       }
-      lines.push(...this.#renderBlockCached(block, width, state.showToolDetails), "");
+      lines.push(
+        ...this.#renderBlockCached(block, width, state.showToolDetails, state.showThinking),
+        "",
+      );
       previous = block;
     }
     if (this.#blockCache.size > state.blocks.length * 3 + 30) {
@@ -90,6 +103,16 @@ export class PilotScreen implements Component {
         "",
       );
     }
+    const activity = this.#activity();
+    if (activity !== undefined) {
+      const indicator = activityIndicator(
+        state.phase,
+        activity.frame,
+        activity.elapsedMs,
+        this.#capabilities.unicode,
+      );
+      if (indicator !== undefined) lines.push(this.#theme.accent(indicator), "");
+    }
     return lines;
   }
 
@@ -97,28 +120,34 @@ export class PilotScreen implements Component {
     block: TranscriptBlock,
     width: number,
     showToolDetails: boolean,
+    showThinking: boolean,
   ): readonly string[] {
-    const key = `${block.id}\0${width}\0${showToolDetails ? "details" : "compact"}`;
+    const key = `${block.id}\0${width}\0${showToolDetails ? "details" : "compact"}\0${showThinking ? "think" : "quiet"}`;
     const cached = this.#blockCache.get(key);
     if (cached?.block === block) return cached.lines;
-    const lines = this.#renderBlock(block, width);
+    const lines = this.#renderBlock(block, width, showThinking);
     this.#blockCache.set(key, { block, lines });
     return lines;
   }
 
-  #renderBlock(block: TranscriptBlock, width: number): string[] {
+  #renderBlock(block: TranscriptBlock, width: number, showThinking: boolean): string[] {
     if (block.kind === "user") {
       const label = this.#capabilities.unicode ? "› You" : "You";
       return [this.#theme.accent(label), ...wrapPlain(block.text, width, 2)];
     }
     if (block.kind === "assistant") {
       const marker = this.#capabilities.unicode ? "◆ " : "";
-      const status =
-        block.status === "streaming"
-          ? this.#theme.muted(this.#capabilities.unicode ? "  ● working" : "  working")
-          : "";
+      const lines = [this.#theme.strong(`${marker}Pilot`)];
+      if (showThinking && block.reasoning !== undefined && block.reasoning.trim().length > 0) {
+        const label = this.#capabilities.unicode ? "  ● thinking" : "  thinking";
+        lines.push(this.#theme.muted(label));
+        for (const line of wrapPlain(sanitizeTerminalText(block.reasoning), width, 2)) {
+          lines.push(this.#theme.muted(line));
+        }
+      }
       const markdown = new Markdown(sanitizeTerminalText(block.text), 1, 0, this.#theme.markdown);
-      return [`${this.#theme.strong(`${marker}Pilot`)}${status}`, ...markdown.render(width)];
+      lines.push(...markdown.render(width));
+      return lines;
     }
     if (block.kind === "tool") {
       return renderTool(
@@ -318,13 +347,62 @@ function renderFileBody(
   return lines;
 }
 
+/**
+ * A short, human-readable one-line summary of a tool call — the primary argument and, where cheap,
+ * a result metric — used for the compact transcript line and the `/tools` overlay labels. Never
+ * emits raw request/response JSON; that stays behind the detail view and the overlay.
+ */
+export function summarizeToolCall(block: ToolTranscriptBlock): string {
+  switch (block.name) {
+    case "run_command":
+      return commandLine(block.input) ?? "command";
+    case "read_file":
+    case "write_file":
+      return stringField(block.input, "path") ?? stringField(block.input, "file") ?? block.name;
+    case "list_files": {
+      const path = stringField(block.input, "path") ?? ".";
+      const count = numberField(block.output, "scannedEntries");
+      return count === undefined
+        ? path
+        : `${path}  ·  ${count} ${count === 1 ? "entry" : "entries"}`;
+    }
+    case "apply_patch":
+      return patchSummary(block.input) ?? "patch";
+    default:
+      return genericInputSummary(block.input) ?? block.name;
+  }
+}
+
+function genericInputSummary(input: JsonValue): string | undefined {
+  const record = objectValue(input);
+  if (record === undefined) return undefined;
+  if (typeof record.path === "string") return record.path;
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return `${key}=${value}`;
+    }
+  }
+  return undefined;
+}
+
+function patchSummary(input: JsonValue): string | undefined {
+  const patch = patchFromInput(input);
+  if (patch === undefined) return undefined;
+  const files = patch
+    .split("\n")
+    .filter((line) => /^\*\*\* (Add|Update|Delete) File: /u.test(line)).length;
+  return files > 0 ? `${files} file${files === 1 ? "" : "s"}` : undefined;
+}
+
 function renderGenericBody(
   block: ToolTranscriptBlock,
   width: number,
   theme: PilotTheme,
   detail: boolean,
 ): string[] {
-  if (!detail) return [];
+  if (!detail) {
+    return [truncateToWidth(theme.muted(`  ${summarizeToolCall(block)}`), width)];
+  }
   const lines = [...wrapStyled(`input ${safeJson(block.input)}`, width, 2, theme.muted)];
   if (block.output !== undefined) {
     lines.push(...wrapStyled(`output ${safeJson(block.output)}`, width, 2, theme.muted));
