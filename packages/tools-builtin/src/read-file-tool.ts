@@ -19,21 +19,49 @@ const readChunkBytes = 65_536;
 
 export const ReadFileInputSchema = z
   .object({
-    path: z.string().min(1).max(4_096),
-    startLine: z.number().int().positive().default(1),
-    endLine: z.number().int().positive().optional(),
+    path: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .describe(
+        'Workspace-relative path to the file, for example "src/index.ts". Absolute paths and ' +
+          "paths outside the workspace are rejected.",
+      ),
+    startLine: z
+      .number()
+      .int()
+      .positive()
+      .default(1)
+      .describe(
+        "First line to return, 1-based. When a previous call reported truncated: true, pass its " +
+          "nextStartLine here to continue from where it stopped.",
+      ),
+    endLine: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Last line to return, 1-based and inclusive. Omit to read to the end of the file, " +
+          "subject to the output size limit.",
+      ),
     maxFileSizeBytes: z
       .number()
       .int()
       .positive()
       .max(hardMaximumFileBytes)
-      .default(defaultMaximumFileBytes),
+      .default(defaultMaximumFileBytes)
+      .describe("Refuse to open files larger than this. Rarely worth setting."),
     maxContentBytes: z
       .number()
       .int()
       .min(1_024)
       .max(hardMaximumContentBytes)
-      .default(defaultMaximumContentBytes),
+      .default(defaultMaximumContentBytes)
+      .describe(
+        "Maximum bytes of file content to return in one call. Lower it to sample a large file " +
+          "cheaply; it cannot be raised above the default.",
+      ),
   })
   .strict()
   .refine(
@@ -110,7 +138,14 @@ export function createReadFileTool(
   return defineTool({
     name: "read_file",
     description:
-      "Read a bounded UTF-8 line range from a workspace file with a full-file content hash and explicit provenance.",
+      "Read the contents of a UTF-8 text file in the workspace.\n\n" +
+      "Use this before editing any file. The result's sha256 is the hash of the whole file, and " +
+      "edit and apply_patch both require it as baseSha256 — so always read a file immediately " +
+      "before you change it, and use the sha256 from that read.\n\n" +
+      "To find files, use glob or grep first; do not guess paths. To read a specific region, pass " +
+      "startLine and endLine. If the result has truncated: true, call again with startLine set to " +
+      "the returned nextStartLine to get the next chunk.\n\n" +
+      'Example: {"path": "src/index.ts", "startLine": 1, "endLine": 120}',
     inputSchema: ReadFileInputSchema,
     outputSchema: ReadFileOutputSchema,
     metadata: {

@@ -2,6 +2,7 @@ import {
   ApplicationRunner,
   ConversationModelRequestContextPreparer,
   ContextEngineError,
+  createSystemPromptContextSource,
   InMemorySessionRepository,
   type InstructionDiscovery,
   type InstructionTarget,
@@ -1084,6 +1085,14 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   const toolStartedAt = new Map<string, number>();
   let latestContextSnapshot: PromptCompositionSnapshot | undefined;
   const configuredContext = dependencies.configuration?.configuration.context;
+  const systemPromptContextSource: ContextSource | undefined =
+    dependencies.configuration?.configuration.prompt.systemPrompt === "none"
+      ? undefined
+      : createSystemPromptContextSource({
+          workspacePath: boundary.rootPath,
+          platform: process.platform,
+          toolNames: tools.list().map(({ definition }) => definition.name),
+        });
   const instructionContextSource: ContextSource | undefined =
     dependencies.instructionDiscovery === undefined
       ? undefined
@@ -1151,9 +1160,12 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       configuredContextTokens: configuredContext?.maxInputTokens ?? 120_000,
       reservedOutputTokens: configuredContext?.reservedOutputTokens ?? 4_096,
       now: () => dependencies.clock.now().toISOString(),
-      ...(instructionContextSource === undefined
-        ? {}
-        : { additionalSources: [instructionContextSource], targetPaths: ["."] }),
+      ...(() => {
+        const sources = [systemPromptContextSource, instructionContextSource].filter(
+          (source): source is ContextSource => source !== undefined,
+        );
+        return sources.length === 0 ? {} : { additionalSources: sources, targetPaths: ["."] };
+      })(),
     }),
     onContextPrepared: (snapshot) => {
       latestContextSnapshot = snapshot;

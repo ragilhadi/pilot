@@ -5,16 +5,27 @@ export const TodoStatusSchema = z.enum(["pending", "in_progress", "completed"]);
 
 export const TodoItemSchema = z
   .object({
-    id: z.string().min(1).max(128),
+    id: z
+      .string()
+      .min(1)
+      .max(128)
+      .describe(
+        'A stable identifier for this item, for example "1" or "add-tests". Reuse the same id ' +
+          "across calls so an item keeps its identity as its status changes.",
+      ),
     content: z
       .string()
       .min(1)
       .max(500)
+      .describe("A single-line description of the task.")
       .refine(
         (value) => !hasControlCharacter(value),
         "Todo content must be a single line without control characters",
       ),
-    status: TodoStatusSchema,
+    status: TodoStatusSchema.describe(
+      'One of "pending", "in_progress", or "completed" (note the underscore). Exactly one item ' +
+        "should be in_progress at a time.",
+    ),
   })
   .strict()
   .readonly();
@@ -31,7 +42,14 @@ const TodoCountsSchema = z
 
 export const TodoWriteInputSchema = z
   .object({
-    items: z.array(TodoItemSchema).max(100).readonly(),
+    items: z
+      .array(TodoItemSchema)
+      .max(100)
+      .readonly()
+      .describe(
+        "The complete task list, including items that are already completed. This replaces the " +
+          "previous list entirely, so never send only the items that changed.",
+      ),
   })
   .strict()
   .readonly();
@@ -100,9 +118,14 @@ export function createTodoWriteTool(
   return defineTool({
     name: "todo_write",
     description:
-      "Replace the agent's task list for this session. Pass the complete set of items each time; " +
-      "the previous list is overwritten. Use it to plan and track progress on multi-step work: " +
-      "mark exactly one item in_progress while working on it, and completed once it is done.",
+      "Record and update your task list for this session.\n\n" +
+      "Use it for work with three or more distinct steps, so progress survives a long stretch of " +
+      "tool calls. Skip it for a single-step task.\n\n" +
+      "Pass the COMPLETE list every time — this replaces the previous list rather than merging " +
+      "into it. Mark exactly one item in_progress while you work on it, and flip it to completed " +
+      "as soon as it is done rather than batching updates.\n\n" +
+      'Example: {"items": [{"id": "1", "content": "Add the parser", "status": "completed"}, ' +
+      '{"id": "2", "content": "Wire it into the CLI", "status": "in_progress"}]}',
     inputSchema: TodoWriteInputSchema,
     outputSchema: TodoListOutputSchema,
     // Bookkeeping only: no workspace, network, or system side effects, so it is
@@ -129,8 +152,10 @@ export function createTodoReadTool(
   return defineTool({
     name: "todo_read",
     description:
-      "Return the agent's current task list for this session. Useful for re-orienting after a long " +
-      "stretch of work or when the earlier list may have scrolled out of context.",
+      "Return your current task list for this session.\n\n" +
+      "Use it to re-orient after a long stretch of work, or when the earlier list may have " +
+      "scrolled out of context.\n\n" +
+      "Takes no arguments: call it with an empty object, {}.",
     inputSchema: TodoReadInputSchema,
     outputSchema: TodoListOutputSchema,
     metadata: {

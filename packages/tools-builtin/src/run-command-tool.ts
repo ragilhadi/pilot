@@ -15,31 +15,77 @@ import { classifyCommandRisk, type CommandIntent } from "./command-risk.js";
 
 const DirectCommandSchema = z
   .object({
-    mode: z.literal("direct"),
-    executable: z.string().min(1).max(4_096).refine(withoutNull),
-    args: z.array(z.string().max(32_768).refine(withoutNull)).max(1_000).default([]).readonly(),
+    mode: z.literal("direct").describe('Must be the exact string "direct".'),
+    executable: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .refine(withoutNull)
+      .describe('The program to run, with no arguments and no shell syntax, for example "npm".'),
+    args: z
+      .array(z.string().max(32_768).refine(withoutNull))
+      .max(1_000)
+      .default([])
+      .readonly()
+      .describe('Arguments as separate array elements, for example ["run", "test"].'),
   })
   .strict()
   .readonly();
 
 const ShellCommandSchema = z
   .object({
-    mode: z.literal("shell"),
-    command: z.string().min(1).max(32_768).refine(withoutNull),
+    mode: z.literal("shell").describe('Must be the exact string "shell".'),
+    command: z
+      .string()
+      .min(1)
+      .max(32_768)
+      .refine(withoutNull)
+      .describe(
+        'The full command line, interpreted by the shell, for example "npm test 2>&1 | tail -20".',
+      ),
   })
   .strict()
   .readonly();
 
 export const RunCommandInputSchema = z
   .object({
-    command: z.discriminatedUnion("mode", [DirectCommandSchema, ShellCommandSchema]),
-    cwd: z.string().min(1).max(4_096).default(".").refine(withoutNull),
+    command: z
+      .discriminatedUnion("mode", [DirectCommandSchema, ShellCommandSchema])
+      .describe(
+        "An object — not a string. Either " +
+          '{"mode": "direct", "executable": "npm", "args": ["run", "test"]} or ' +
+          '{"mode": "shell", "command": "npm run test | tail -20"}. ' +
+          "Prefer direct mode; use shell mode only when you need pipes, redirection, globbing, " +
+          "or chaining.",
+      ),
+    cwd: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .default(".")
+      .refine(withoutNull)
+      .describe('Workspace-relative working directory. Defaults to "." (the workspace root).'),
     environment: z
       .record(z.string().min(1).max(256), z.string().max(65_536))
       .default({})
-      .readonly(),
-    timeoutMs: z.number().int().min(100).max(120_000).default(30_000),
-    maxOutputBytes: z.number().int().min(1_024).max(1_000_000).default(100_000),
+      .readonly()
+      .describe(
+        "Extra environment variables. Only CI and NO_COLOR may be set; anything else is refused.",
+      ),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(100)
+      .max(120_000)
+      .default(30_000)
+      .describe("Kill the command after this many milliseconds. Raise it for slow test suites."),
+    maxOutputBytes: z
+      .number()
+      .int()
+      .min(1_024)
+      .max(1_000_000)
+      .default(100_000)
+      .describe("Maximum bytes captured from each of stdout and stderr before truncation."),
   })
   .strict()
   .readonly();
@@ -264,7 +310,17 @@ export function createRunCommandTool(
   return defineTool({
     name: "run_command",
     description:
-      "Run a bounded command in the workspace. Prefer direct executable/argument mode; shell-string mode is higher risk.",
+      "Run a command in the workspace — build, test, lint, or any other tooling.\n\n" +
+      "The command argument is an OBJECT, not a string, and has two forms:\n" +
+      '  direct (preferred): {"command": {"mode": "direct", "executable": "npm", ' +
+      '"args": ["run", "test"]}}\n' +
+      "  shell (only when you need pipes, redirection, globbing, or &&): " +
+      '{"command": {"mode": "shell", "command": "npm run test | tail -20"}}\n\n' +
+      "Do not use this to read or search files — read_file, grep, and glob are faster, cheaper, " +
+      "and do not require approval.\n\n" +
+      "A non-zero exit code is returned as a normal result, not an error: inspect stdout, stderr, " +
+      "and exitCode, then revise the command. Every command runs inside the workspace and asks " +
+      "for approval before it runs.",
     inputSchema: RunCommandInputSchema,
     outputSchema: RunCommandOutputSchema,
     metadata: {

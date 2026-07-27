@@ -124,6 +124,11 @@ export {
   type InstructionTrust,
 } from "./instruction-discovery.js";
 export {
+  composeSystemPrompt,
+  createSystemPromptContextSource,
+  type SystemPromptInput,
+} from "./system-prompt.js";
+export {
   ContextEngine,
   ContextEngineError,
   resolveContextBudget,

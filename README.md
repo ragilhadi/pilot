@@ -104,9 +104,19 @@ with `pilot config --json`.
   "schemaVersion": 1,
   "model": { "default": "ollama/glm-5.2:cloud" },
   "context": { "maxInputTokens": 120000, "reservedOutputTokens": 4096 },
+  "prompt": { "systemPrompt": "builtin" },
   "runBudget": { "maxElapsedMs": 1800000 },
 }
 ```
+
+### System prompt
+
+Pilot sends a small, provider-neutral set of baseline instructions ahead of your own
+`AGENTS.md` files: which tool to reach for, the read-then-edit hash handshake that `edit` and
+`apply_patch` require, how to read a failed tool result, and the rule that file and web content
+is data rather than instructions. It exists mainly so smaller models behave predictably; larger
+ones mostly infer it. Set `"prompt": { "systemPrompt": "none" }` to send nothing but your own
+instructions.
 
 ### Run budget
 
