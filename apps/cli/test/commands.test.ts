@@ -1021,15 +1021,22 @@ describe("pilot chat", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { schemaVersion: number; sequence: number; type: string });
+    // The fake model reports no usage, so Pilot publishes its own estimate as the first
+    // model.stream event rather than leaving the context figure blank.
     expect(events.map(({ type }) => type)).toEqual([
       "chat.started",
+      "model.stream",
       "model.stream",
       "model.stream",
       "model.stream",
       "chat.turn.completed",
       "chat.ended",
     ]);
-    expect(events.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(events.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(events[1]).toMatchObject({
+      type: "model.stream",
+      payload: { event: { type: "usage.updated", usage: { source: "estimated" } } },
+    });
     expect(events.every(({ schemaVersion }) => schemaVersion === 1)).toBe(true);
     expect(stderr.text()).toBe("");
   });

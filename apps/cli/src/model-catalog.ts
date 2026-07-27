@@ -73,6 +73,7 @@ export function createModelCatalog(dependencies: ModelCatalogDependencies): Mode
           reasoning: true,
           configurableReasoningEffort: false,
           systemMessages: true,
+          maxContextTokens: 128_000,
         }),
         ...(dependencies.fetch === undefined ? {} : { fetch: dependencies.fetch }),
       }),
@@ -177,6 +178,7 @@ function persistedModelCapabilities(model: PersistedModel) {
     reasoning: false,
     configurableReasoningEffort: false,
     systemMessages: true,
+    ...(model.contextWindow === undefined ? {} : { maxContextTokens: model.contextWindow }),
   });
 }
 

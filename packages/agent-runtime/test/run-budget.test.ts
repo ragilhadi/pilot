@@ -224,8 +224,28 @@ describe("model token and cost reservations", () => {
       }),
     ).toMatchObject({
       allowed: true,
-      snapshot: { inputTokens: 100, outputTokens: 50, estimatedCostUsd: 1 },
+      // Input is the peak single request (settled call-1 charged 55, call-2 reserves 45), not the
+      // sum: every request re-sends the whole conversation, so summing multiplies the real figure
+      // by the number of cycles. Output and cost are genuinely per-attempt and still accumulate.
+      snapshot: { inputTokens: 55, outputTokens: 50, estimatedCostUsd: 1 },
     });
+  });
+
+  it("reports the peak request rather than the sum of every cycle's prompt tokens", () => {
+    const { budget } = tracker({
+      maxModelAttempts: 10,
+      maxInputTokens: 10_000,
+      maxOutputTokens: 1_000,
+    });
+
+    for (const [index, inputTokens] of [1_000, 2_000, 3_000].entries()) {
+      const callId = `cycle-${index}`;
+      budget.startModelAttempt({ callId, inputTokens, outputTokens: 10, estimatedCostUsd: 0 });
+      budget.recordModelUsage(callId, { inputTokens, outputTokens: 10, source: "provider" });
+      budget.settleModelAttempt(callId);
+    }
+
+    expect(budget.snapshot()).toMatchObject({ inputTokens: 3_000, outputTokens: 30 });
   });
 
   it("merges cumulative stream usage instead of double-counting updates", () => {
