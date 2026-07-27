@@ -763,7 +763,7 @@ describe("pilot chat", () => {
             type: "tool-result",
             callId: "call-read",
             isError: false,
-            output: { path: "evidence.txt", content: "CLI repository evidence\n" },
+            output: { path: "evidence.txt", content: "     1\tCLI repository evidence\n" },
           },
         ],
       });

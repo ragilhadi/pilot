@@ -51,9 +51,11 @@ describe("read_file", () => {
     );
 
     const sha256 = createHash("sha256").update(Buffer.from(source)).digest("hex");
+    // Line-numbered like `cat -n`, and the file's own CRLF terminator is preserved so text copied
+    // out of the result still matches the file byte for byte.
     expect(result.output).toEqual({
       path: "src/main.ts",
-      content: "βeta\r\n",
+      content: "     2\tβeta\r\n",
       startLine: 2,
       endLine: 2,
       totalLines: 3,
@@ -62,6 +64,7 @@ describe("read_file", () => {
       encoding: "utf-8",
       hasBom: false,
       lineEnding: "crlf",
+      contentFormat: "numbered-lines",
       truncated: false,
       lineTruncated: false,
       sanitizedCharacters: 0,
@@ -103,7 +106,7 @@ describe("read_file", () => {
       hasBom: false,
     });
     expect(mixed.output).toMatchObject({
-      content: "one\ntwo\rthree\r\n",
+      content: "     1\tone\n     2\ttwo\r     3\tthree\r\n",
       totalLines: 3,
       lineEnding: "mixed",
       hasBom: true,
@@ -131,11 +134,13 @@ describe("read_file", () => {
       truncationReason: "output-bytes",
       lineTruncated: true,
     });
-    expect(result.output.nextStartLine).toBeUndefined();
+    // Even a line too large for the whole budget yields forward progress rather than a result
+    // whose nextStartLine points back at the line that would not fit.
+    expect(result.output.nextStartLine).toBe(2);
   });
 
   it("provides a next-line retrieval hint when truncation lands on a line boundary", async () => {
-    await writeFile(path.join(workspacePath, "paged.txt"), `${"x".repeat(1_023)}\nnext\n`);
+    await writeFile(path.join(workspacePath, "paged.txt"), `${"x".repeat(1_010)}\nnext\n`);
     const boundary = await NodeWorkspaceBoundary.create(workspacePath);
     const readFile = createReadFileTool(boundary);
 
@@ -165,7 +170,52 @@ describe("read_file", () => {
     expect(Buffer.byteLength(JSON.stringify(result.output), "utf8")).toBeLessThan(
       readFile.metadata.maxOutputBytes,
     );
-    expect(result.output).toMatchObject({ truncated: true, nextStartLine: 100_001 });
+    // The 2000-line default now binds well before the byte budget does.
+    expect(result.output).toMatchObject({
+      truncated: true,
+      truncationReason: "line-limit",
+      nextStartLine: 2_001,
+    });
+  });
+
+  it("caps a single very long line so it cannot fill the whole result", async () => {
+    await writeFile(path.join(workspacePath, "minified.js"), `${"a".repeat(50_000)}\nsecond\n`);
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const readFile = createReadFileTool(boundary);
+
+    const result = await readFile.execute(
+      ReadFileInputSchema.parse({ path: "minified.js" }),
+      context(),
+    );
+
+    expect(result.output.lineTruncated).toBe(true);
+    expect(result.output.content).toContain("…");
+    expect(result.output.content).toContain("     2\tsecond");
+    // The clipped line leaves room for the rest of the file instead of consuming the budget.
+    expect(result.output.truncated).toBe(false);
+    expect(result.output.endLine).toBe(2);
+  });
+
+  it("returns at most `limit` lines and points at the next one", async () => {
+    const source = Array.from({ length: 50 }, (_, index) => `line ${index + 1}`).join("\n");
+    await writeFile(path.join(workspacePath, "many.txt"), source);
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const readFile = createReadFileTool(boundary);
+
+    const result = await readFile.execute(
+      ReadFileInputSchema.parse({ path: "many.txt", limit: 10 }),
+      context(),
+    );
+
+    expect(result.output.content.split("\n").filter(Boolean)).toHaveLength(10);
+    expect(result.output).toMatchObject({
+      endLine: 10,
+      totalLines: 50,
+      truncated: true,
+      truncationReason: "line-limit",
+      nextStartLine: 11,
+    });
+    expect(result.output.content.startsWith("     1\tline 1\n")).toBe(true);
   });
 
   it("sanitizes terminal controls while retaining the raw-file hash", async () => {
@@ -179,7 +229,7 @@ describe("read_file", () => {
       context(),
     );
 
-    expect(result.output.content).toBe("safe�[31m text\n");
+    expect(result.output.content).toBe("     1\tsafe�[31m text\n");
     expect(result.output.sanitizedCharacters).toBe(1);
     expect(result.output.sha256).toBe(
       createHash("sha256").update(Buffer.from(source)).digest("hex"),
