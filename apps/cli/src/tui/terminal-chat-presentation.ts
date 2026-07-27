@@ -48,6 +48,9 @@ export interface TerminalChatPresentationOptions {
   readonly activityIntervalMs?: number;
 }
 
+/** Rows reserved below the permission dialog: the footer's two lines plus one composer line. */
+export const permissionDialogBottomMargin = 3;
+
 export interface ModelDisplayState {
   readonly key: string;
   readonly displayName: string;
@@ -559,13 +562,16 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   #showPermissionOverlay(request: PermissionApprovalRequest): void {
     if (this.#permissionOverlayRequestId === request.requestId) return;
     this.#permissionOverlayRequestId = request.requestId;
-    const dialog = new PermissionDialog(request, this.#theme);
+    const dialog = new PermissionDialog(request, this.#theme, this.#capabilities);
     const handle = this.#tui.showOverlay(dialog, {
       width: "100%",
       minWidth: 36,
-      maxHeight: "75%",
-      anchor: "center",
-      margin: 0,
+      maxHeight: "70%",
+      // Unlike the other overlays, this one is a response to what the user is doing right now, so
+      // it belongs next to the composer. Centering it put a tall dialog a few rows from the top of
+      // the screen with a gap between it and the input the user is looking at.
+      anchor: "bottom-center",
+      margin: { bottom: permissionDialogBottomMargin },
     });
     const finish = (response: string) => {
       handle.hide();
