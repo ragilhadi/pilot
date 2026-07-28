@@ -51,9 +51,26 @@ export interface ToolResultPreservedErrorTruncation {
   readonly omittedDetail: "metadata" | "metadata-and-message";
 }
 
+/**
+ * Emitted when a structured result was reduced by shortening its bulkiest text field. The object's
+ * shape and every other field survive, so the model still sees the paging hints, hashes, and
+ * counters it needs to ask for the rest.
+ */
+export interface ToolResultFieldContentTruncation {
+  readonly schemaVersion: 1;
+  readonly strategy: "field-content";
+  readonly untrusted: true;
+  readonly field: string;
+  readonly maximumBytes: number;
+  readonly originalBytes: number;
+  readonly retainedBytes: number;
+  readonly omittedBytes: number;
+}
+
 export type ToolResultTruncationMetadata =
   | ToolResultHeadTailTruncation
-  | ToolResultPreservedErrorTruncation;
+  | ToolResultPreservedErrorTruncation
+  | ToolResultFieldContentTruncation;
 
 export interface FormattedToolResultContext {
   readonly output: JsonValue;
@@ -113,6 +130,12 @@ export class ToolResultContextFormatter implements ToolResultContextFormatterPor
     // optional detail instead and keep the recovery-critical fields intact.
     const preserved = boundErrorEnvelope(output, this.#maximumBytes);
     if (preserved !== undefined) return preserved;
+
+    // A structured result carries its own paging hints (nextStartLine, truncated, counters) next to
+    // its bulk text. Re-serializing the whole object into head/tail string fragments destroys those
+    // hints and double-escapes the payload; shortening the one oversized field keeps them intact.
+    const reduced = boundLargestStringField(output, this.#maximumBytes, this.#headShare);
+    if (reduced !== undefined) return reduced;
 
     const contentType = typeof output === "string" ? "text" : "json";
     const content = typeof output === "string" ? output : canonicalJson(output);
@@ -251,6 +274,92 @@ function boundErrorEnvelope(
   });
 }
 
+/**
+ * Shortens the single largest top-level string field of a structured result until the whole object
+ * fits, keeping every other field verbatim. Returns undefined when the output is not an object, has
+ * no string field worth shortening, or still does not fit once that field is emptied — in which
+ * case the caller falls back to head/tail truncation of the whole payload.
+ */
+function boundLargestStringField(
+  output: JsonValue,
+  maximumBytes: number,
+  headShare: number,
+): FormattedToolResultContext | undefined {
+  if (typeof output !== "object" || output === null || Array.isArray(output)) return undefined;
+  const record = output as JsonObject;
+
+  let field: string | undefined;
+  let fieldValue = "";
+  let largest = 0;
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value !== "string") continue;
+    const size = utf8Bytes(value);
+    if (size > largest) {
+      largest = size;
+      field = key;
+      fieldValue = value;
+    }
+  }
+  if (field === undefined || largest === 0) return undefined;
+  const targetField = field;
+
+  const originalBytes = largest;
+  const characters = [...fieldValue];
+  const assemble = (replacement: string): JsonObject =>
+    Object.freeze({
+      ...record,
+      [targetField]: replacement,
+      pilotTruncation: Object.freeze({
+        schemaVersion: 1,
+        strategy: "field-content",
+        untrusted: true,
+        field: targetField,
+        maximumBytes,
+        originalBytes,
+        retainedBytes: utf8Bytes(replacement),
+        omittedBytes: Math.max(0, originalBytes - utf8Bytes(replacement)),
+      }) as unknown as JsonValue,
+    });
+
+  const marker = (omitted: number): string =>
+    `\n…[${omitted} bytes omitted — request a narrower range, path, or limit]…\n`;
+
+  // If the object does not fit even with the field emptied, the bulk is elsewhere; let the generic
+  // path handle it rather than producing a result that is all envelope and no content.
+  const emptyBytes = serializedBytes(assemble(marker(originalBytes)));
+  if (emptyBytes > maximumBytes) return undefined;
+
+  const build = (headCount: number, tailCount: number): string => {
+    const head = characters.slice(0, headCount).join("");
+    const tail = tailCount === 0 ? "" : characters.slice(-tailCount).join("");
+    const omitted = Math.max(0, originalBytes - utf8Bytes(head) - utf8Bytes(tail));
+    return `${head}${marker(omitted)}${tail}`;
+  };
+
+  // Cap the tail search at its share of the budget, or it consumes everything and leaves the head
+  // — the part the model usually needs first — empty.
+  const tailCeiling = emptyBytes + Math.floor((maximumBytes - emptyBytes) * (1 - headShare));
+  const tailCount = maximumFittingCount(
+    Math.max(0, characters.length - 1),
+    (count) => serializedBytes(assemble(build(0, count))) <= tailCeiling,
+  );
+  const headCount = maximumFittingCount(
+    Math.max(0, characters.length - tailCount - 1),
+    (count) => serializedBytes(assemble(build(count, tailCount))) <= maximumBytes,
+  );
+  if (headCount + tailCount >= characters.length) return undefined;
+
+  const bounded = assemble(build(headCount, tailCount));
+  const bytes = serializedBytes(bounded);
+  if (bytes > maximumBytes) return undefined;
+  return Object.freeze({
+    output: bounded,
+    truncated: true,
+    serializedBytes: bytes,
+    truncation: readTruncationMetadata(bounded.pilotTruncation),
+  });
+}
+
 interface TruncationMeasurements {
   readonly contentType: "json" | "text";
   readonly maximumBytes: number;
@@ -286,7 +395,9 @@ function readTruncationMetadata(value: JsonValue | undefined): ToolResultTruncat
   const object = value as JsonObject;
   if (
     object.schemaVersion !== 1 ||
-    (object.strategy !== "head-tail" && object.strategy !== "preserve-error")
+    (object.strategy !== "head-tail" &&
+      object.strategy !== "preserve-error" &&
+      object.strategy !== "field-content")
   ) {
     throw new ToolResultContextError("Tool-result truncation metadata was malformed");
   }

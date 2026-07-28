@@ -1,5 +1,6 @@
 import {
   AgentMessageSchema,
+  agentMessageWireText,
   CancellationError,
   JsonValueSchema,
   PilotError,
@@ -237,7 +238,10 @@ export class Utf8HeuristicTokenEstimator implements ContextTokenEstimator {
   readonly #framingTokens: number;
 
   constructor(options: { readonly bytesPerToken?: number; readonly framingTokens?: number } = {}) {
-    this.#bytesPerToken = options.bytesPerToken ?? 3;
+    // Real tokenizers average roughly 3.7-4.2 bytes per token on English and code. The previous
+    // divisor of 3 over-counted every candidate by 25-35% before the JSON envelope was even
+    // considered.
+    this.#bytesPerToken = options.bytesPerToken ?? 4;
     this.#framingTokens = options.framingTokens ?? 4;
     if (!Number.isSafeInteger(this.#bytesPerToken) || this.#bytesPerToken < 1) {
       throw new ContextEngineError("PILOT_CONTEXT_INVALID", "bytesPerToken must be positive");
@@ -248,7 +252,10 @@ export class Utf8HeuristicTokenEstimator implements ContextTokenEstimator {
   }
 
   estimate(content: ContextContent): ContextTokenEstimate {
-    const serialized = typeof content === "string" ? content : JSON.stringify(content);
+    // Estimate what actually crosses the wire. Serializing the whole AgentMessage counted its id,
+    // session id, run id, timestamps, provenance, metadata, and every layer of JSON escaping —
+    // none of which the model ever sees.
+    const serialized = typeof content === "string" ? content : agentMessageWireText(content);
     const bytes = new TextEncoder().encode(serialized).byteLength;
     return Object.freeze({
       tokens: safeTokenSum(Math.ceil(bytes / this.#bytesPerToken), this.#framingTokens),

@@ -65,6 +65,29 @@ describe("terminal UI golden frames", () => {
     expect(frame.join("\n")).toContain("12 passed");
   });
 
+  it.each([
+    {
+      name: "as a fraction of the model's context window",
+      usage: { inputTokens: 38_400, outputTokens: 1_200, contextWindowTokens: 128_000 },
+      expected: "ctx 38k/128k (30%)",
+    },
+    {
+      name: "without a denominator when the window is unknown",
+      usage: { inputTokens: 38_400 },
+      expected: "ctx 38k",
+    },
+    {
+      name: "marked with ~ when the figure is Pilot's own estimate",
+      usage: { inputTokens: 38_400, contextWindowTokens: 128_000, estimated: true },
+      expected: "ctx ~38k/128k (30%)",
+    },
+  ])("renders context usage $name", ({ usage, expected }) => {
+    const theme = createPilotTheme(capabilities, "dark");
+    const footer = new PilotFooter(() => ({ ...goldenState, usage }), theme, capabilities);
+
+    expect(footer.render(100).join("\n")).toContain(expected);
+  });
+
   it.each(pilotThemeModes)("renders the %s semantic theme without losing labels", (mode) => {
     const theme = createPilotTheme({ ...capabilities, color: true }, mode);
     expect(theme.danger("failed")).toContain("failed");

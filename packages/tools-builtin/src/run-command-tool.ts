@@ -84,7 +84,9 @@ export const RunCommandInputSchema = z
       .int()
       .min(1_024)
       .max(1_000_000)
-      .default(100_000)
+      // Matches context.maxToolResultBytes, so command output is bounded once here rather than
+      // captured at 100 KB and then cut a second time on the way into the prompt.
+      .default(32_768)
       .describe("Maximum bytes captured from each of stdout and stderr before truncation."),
   })
   .strict()

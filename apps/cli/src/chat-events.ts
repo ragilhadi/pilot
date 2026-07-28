@@ -32,8 +32,14 @@ interface ChatEventBase<Type extends string, Payload> {
 }
 
 export type ChatEvent =
-  | ChatEventBase<"chat.started", { readonly modelKey: string }>
-  | ChatEventBase<"chat.model.changed", { readonly modelKey: string }>
+  | ChatEventBase<
+      "chat.started",
+      { readonly modelKey: string; readonly contextWindowTokens?: number }
+    >
+  | ChatEventBase<
+      "chat.model.changed",
+      { readonly modelKey: string; readonly contextWindowTokens?: number }
+    >
   | ChatEventBase<"chat.help", { readonly commands: readonly string[] }>
   | ChatEventBase<"chat.context", { readonly snapshot?: PromptCompositionSnapshot }>
   | ChatEventBase<"chat.input.queued", { readonly messageId: string }>

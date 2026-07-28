@@ -50,7 +50,8 @@ export function composeSystemPrompt(input: SystemPromptInput): string {
   if (has("read_file")) {
     findingCode.push(
       "- Use `read_file` to read a file once you know its path. Read a targeted line range rather " +
-        "than a whole large file.",
+        "than a whole large file. Its output is line-numbered like `cat -n`; the number and tab " +
+        "are a gutter, not file content, so strip them before reusing any of that text.",
     );
   }
   if (findingCode.length > 0) {

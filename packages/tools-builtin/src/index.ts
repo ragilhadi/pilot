@@ -48,6 +48,7 @@ export {
   GlobInputSchema,
   GlobOutputSchema,
   ListFilesInputSchema,
+  listWorkspaceDirectory,
   ListFilesOutputSchema,
   type BuiltinFileListTools,
   type FileListEntry,
@@ -55,6 +56,8 @@ export {
   type GlobOutput,
   type ListFilesInput,
   type ListFilesOutput,
+  type WalkInput,
+  type WalkResult,
 } from "./file-list-tools.js";
 export {
   createGrepTool,

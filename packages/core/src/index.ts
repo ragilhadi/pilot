@@ -83,10 +83,12 @@ export type {
 export {
   AgentIdSchema,
   AgentMessageSchema,
+  agentMessageWireText,
   ImagePartSchema,
   MessageIdSchema,
   MessagePartSchema,
   MessageProvenanceSchema,
+  messageTextContent,
   parseAgentMessage,
   RedactedPartSchema,
   RunIdSchema,

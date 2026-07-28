@@ -162,6 +162,7 @@ export {
   type ToolResultContextFormatterPort,
   type ToolResultContextInput,
   type ToolResultContextPolicy,
+  type ToolResultFieldContentTruncation,
   type ToolResultHeadTailTruncation,
   type ToolResultPreservedErrorTruncation,
   type ToolResultTruncationMetadata,
