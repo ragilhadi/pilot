@@ -2,7 +2,10 @@ import type { Terminal } from "@earendil-works/pi-tui";
 import { runId, sessionId } from "@pilotrun/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChatEventFactory } from "../src/index.js";
-import { TerminalChatPresentation } from "../src/tui/terminal-chat-presentation.js";
+import {
+  permissionDialogBottomMargin,
+  TerminalChatPresentation,
+} from "../src/tui/terminal-chat-presentation.js";
 
 class FakeTerminal implements Terminal {
   columns: number;
@@ -399,14 +402,49 @@ describe("terminal chat presentation", () => {
 
     terminal.input("d");
     await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(terminal.output).toContain("Lines 1-14 of 33");
+    // The viewport is sized from the terminal's rows, so on an 80x24 screen it fits inside the
+    // overlay's height budget and the key hints below it are not sliced off.
+    expect(terminal.output).toContain("Lines 1-8 of 33");
+    expect(terminal.output).toContain("d/Esc back");
     terminal.input("\u001b[6~");
     await new Promise((resolve) => setTimeout(resolve, 25));
-    expect(terminal.output).toContain("Lines 11-24 of 33");
+    expect(terminal.output).toContain("Lines 11-18 of 33");
     terminal.input("\u001b");
     terminal.input("\u001b");
 
     await expect(response).resolves.toBe("deny once");
+  });
+
+  it("anchors the permission dialog just above the composer, not mid-screen", async () => {
+    const terminal = new FakeTerminal(80, 24);
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities: { ...capabilities, columns: 80, rows: 24 },
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-22T12:00:00.000Z") });
+    presentation.render(
+      factory.create({
+        type: "chat.started",
+        sessionId: sessionId("session-anchor"),
+        payload: { modelKey: "ollama/glm-5.2:cloud" },
+      }),
+    );
+    presentation.render(permissionEvent(factory));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    // The last frame written to the terminal, split into rows.
+    const frame = terminal.output.split("\u001b[?2026h").at(-1) ?? "";
+    const lines = frame.split("\n");
+    const lastBorder = lines.findLastIndex((line) => line.includes("+---"));
+    const firstBorder = lines.findIndex((line) => line.includes("+---"));
+
+    expect(firstBorder).toBeGreaterThan(0);
+    // Centering placed a tall dialog a few rows from the top of the screen, leaving a gap between
+    // it and the input. Bottom-anchoring puts its lower edge exactly the reserved margin above the
+    // bottom of the terminal, whatever the dialog's height.
+    expect(24 - 1 - lastBorder).toBe(permissionDialogBottomMargin);
   });
 
   it.each([
@@ -441,8 +479,10 @@ describe("terminal chat presentation", () => {
     terminal.resize(columns, rows);
     await new Promise((resolve) => setTimeout(resolve, 30));
 
-    expect(terminal.output).toContain("PILOT");
     expect(terminal.output).toContain("Permission required");
+    // On a 10-row terminal the dialog plus footer fill the screen, so the transcript header is
+    // legitimately scrolled out; anywhere with room, it stays visible alongside the dialog.
+    if (rows >= 16) expect(terminal.output).toContain("PILOT");
   });
 
   it("uses ASCII and no-color semantics without losing state labels", async () => {

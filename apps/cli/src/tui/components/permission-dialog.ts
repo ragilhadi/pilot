@@ -21,15 +21,21 @@ export class PermissionDialog implements Component {
   readonly #request: PermissionApprovalRequest;
   readonly #theme: PilotTheme;
   readonly #patch: string | undefined;
+  readonly #rows: number;
   #list: SelectList;
   #mode: "decision" | "diff" | "more" = "decision";
   #diffOffset = 0;
   onResponse?: (response: string) => void;
   onCancel?: () => void;
 
-  constructor(request: PermissionApprovalRequest, theme: PilotTheme) {
+  constructor(
+    request: PermissionApprovalRequest,
+    theme: PilotTheme,
+    capabilities?: { readonly rows: number },
+  ) {
     this.#request = request;
     this.#theme = theme;
+    this.#rows = capabilities?.rows ?? 30;
     this.#patch =
       request.action.kind === "tool" && request.action.toolName === "apply_patch"
         ? patchFromInput(request.action.input)
@@ -149,7 +155,10 @@ export class PermissionDialog implements Component {
 
   #renderDiff(width: number, innerWidth: number): string[] {
     const allLines = sanitizeTerminalText(this.#patch ?? "").split(/\r?\n/u);
-    const viewportLines = 14;
+    // pi-tui hard-truncates an overlay taller than its maxHeight, so a fixed viewport used to slice
+    // the scroll hints off the bottom on a short terminal. Size it from the rows actually available
+    // (70% of the screen, less this dialog's own chrome).
+    const viewportLines = Math.max(6, Math.floor(this.#rows * 0.7) - 8);
     const maximumOffset = Math.max(0, allLines.length - viewportLines);
     this.#diffOffset = Math.min(this.#diffOffset, maximumOffset);
     const visible = allLines.slice(this.#diffOffset, this.#diffOffset + viewportLines);
