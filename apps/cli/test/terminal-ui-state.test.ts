@@ -353,7 +353,12 @@ describe("terminal UI reducer", () => {
           truncated: false,
         },
       ],
-      usage: { inputTokens: 800, outputTokens: 120, estimatedCostUsd: 0.004 },
+      usage: {
+        inputTokens: 800,
+        outputTokens: 120,
+        estimatedCostUsd: 0.004,
+        estimated: false,
+      },
       elapsedMs: 1_600,
     });
     expect(ui.state().blocks.at(-1)).toMatchObject({ kind: "summary" });

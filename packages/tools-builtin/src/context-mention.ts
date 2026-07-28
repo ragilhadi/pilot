@@ -1,5 +1,7 @@
 import { open, stat } from "node:fs/promises";
 import { CancellationError, type WorkspaceBoundary } from "@pilotrun/core";
+import { hasBinaryExtension, isBinaryContent } from "./binary-detection.js";
+import { listWorkspaceDirectory } from "./file-list-tools.js";
 import { loadRepositoryIgnoreRules, type RepositoryIgnoreRules } from "./ignore-rules.js";
 import { WorkspacePathError } from "./workspace-boundary.js";
 
@@ -20,6 +22,8 @@ export type MentionSkipReason =
   | "not-found"
   | "outside-workspace"
   | "not-a-file"
+  | "binary"
+  | "folder-empty"
   | "budget-exceeded"
   | "unreadable";
 
@@ -73,6 +77,8 @@ export interface ResolveContextMentionsOptions {
   readonly maxTotalBytes?: number;
   /** Maximum number of files attached in one turn. Defaults to 20. */
   readonly maxFiles?: number;
+  /** How deep a mentioned folder is walked. Defaults to 20 levels. */
+  readonly maxFolderDepth?: number;
   /** Size limit for each ignore file when loading rules. Defaults to 256 KiB. */
   readonly maxIgnoreFileBytes?: number;
   readonly signal?: AbortSignal;
@@ -81,8 +87,11 @@ export interface ResolveContextMentionsOptions {
 const DEFAULT_MAX_FILE_BYTES = 65_536;
 const DEFAULT_MAX_TOTAL_BYTES = 262_144;
 const DEFAULT_MAX_FILES = 20;
+const DEFAULT_MAX_FOLDER_DEPTH = 20;
 const DEFAULT_MAX_IGNORE_FILE_BYTES = 262_144;
 const READ_CHUNK_BYTES = 65_536;
+/** Bytes sampled from the head of a file to decide whether it is text. */
+const BINARY_SAMPLE_BYTES = 8_192;
 
 // `@` must sit at a token boundary (start of input or after whitespace) so that
 // email addresses such as `name@example.com` are never treated as mentions.
@@ -152,6 +161,61 @@ export async function resolveContextMentions(
   const seen = new Set<string>();
   let totalBytes = 0;
 
+  type AttachOutcome = "attached" | "skipped" | "budget-exceeded";
+
+  /** Reads one workspace file into the attachment list, honouring the shared per-turn budgets. */
+  const attachFile = async (relativePath: string, raw: string): Promise<AttachOutcome> => {
+    if (seen.has(relativePath)) return "skipped";
+
+    const remaining = maxTotalBytes - totalBytes;
+    if (attachments.length >= maxFiles || remaining <= 0) {
+      return "budget-exceeded";
+    }
+
+    let resolvedFile: Awaited<ReturnType<WorkspaceBoundary["resolve"]>>;
+    let size: number;
+    try {
+      resolvedFile = await options.boundary.resolve(relativePath, "read");
+      size = (await stat(resolvedFile.realPath ?? resolvedFile.absolutePath)).size;
+    } catch {
+      skipped.push(Object.freeze({ raw, path: relativePath, reason: "unreadable" }));
+      return "skipped";
+    }
+    const absolutePath = resolvedFile.realPath ?? resolvedFile.absolutePath;
+
+    // Without this a mentioned PNG used to be decoded as UTF-8 and pasted into the prompt as
+    // mojibake; expanding a folder into many files makes that far more likely.
+    if (await isBinaryFile(absolutePath, relativePath, options.signal)) {
+      skipped.push(Object.freeze({ raw, path: relativePath, reason: "binary" }));
+      return "skipped";
+    }
+
+    const limit = Math.min(maxFileBytes, remaining);
+    let read: { readonly content: string; readonly bytes: number; readonly truncated: boolean };
+    try {
+      read = await readBounded(absolutePath, limit, size, options.signal);
+    } catch (error) {
+      if (error instanceof CancellationError) {
+        throw error;
+      }
+      skipped.push(Object.freeze({ raw, path: relativePath, reason: "unreadable" }));
+      return "skipped";
+    }
+
+    seen.add(relativePath);
+    totalBytes += read.bytes;
+    attachments.push(
+      Object.freeze({
+        raw,
+        path: relativePath,
+        bytes: read.bytes,
+        truncated: read.truncated,
+        content: read.content,
+      }),
+    );
+    return "attached";
+  };
+
   for (const mention of mentions) {
     throwIfAborted(options.signal);
 
@@ -186,47 +250,66 @@ export async function resolveContextMentions(
       continue;
     }
 
+    if (stats.isDirectory()) {
+      // A mentioned folder expands into its eligible files. The shared walker already applies the
+      // ignore rules, refuses to follow symlinks out of the workspace, and caps its own scan.
+      let walked: Awaited<ReturnType<typeof listWorkspaceDirectory>>;
+      try {
+        walked = await listWorkspaceDirectory(
+          options.boundary,
+          {
+            path: relativePath.length === 0 ? "." : relativePath,
+            maxDepth: options.maxFolderDepth ?? DEFAULT_MAX_FOLDER_DEPTH,
+            limit: maxFiles,
+            includeHidden: false,
+            ignoreRules,
+          },
+          options.signal ?? new AbortController().signal,
+        );
+      } catch (error) {
+        if (error instanceof CancellationError) throw error;
+        skipped.push(Object.freeze({ raw: mention.raw, path: relativePath, reason: "unreadable" }));
+        continue;
+      }
+      const files = walked.entries.filter((entry) => entry.kind === "file");
+      if (files.length === 0) {
+        skipped.push(
+          Object.freeze({ raw: mention.raw, path: relativePath, reason: "folder-empty" }),
+        );
+        continue;
+      }
+      let unbudgeted = 0;
+      for (const [index, entry] of files.entries()) {
+        throwIfAborted(options.signal);
+        if ((await attachFile(entry.path, mention.raw)) === "budget-exceeded") {
+          // Every remaining file is cut off by the same budget; report them once, not each.
+          unbudgeted = files.length - index;
+          break;
+        }
+      }
+      if (unbudgeted > 0) {
+        skipped.push(
+          Object.freeze({
+            raw: mention.raw,
+            path: relativePath,
+            reason: "budget-exceeded",
+            detail: `${unbudgeted} of ${files.length} files not attached`,
+          }),
+        );
+      }
+      continue;
+    }
+
     if (!stats.isFile()) {
       skipped.push(Object.freeze({ raw: mention.raw, path: relativePath, reason: "not-a-file" }));
       continue;
     }
 
-    const remaining = maxTotalBytes - totalBytes;
-    if (attachments.length >= maxFiles || remaining <= 0) {
+    if ((await attachFile(relativePath, mention.raw)) === "budget-exceeded") {
       skipped.push(
         Object.freeze({ raw: mention.raw, path: relativePath, reason: "budget-exceeded" }),
       );
-      continue;
     }
-
-    const limit = Math.min(maxFileBytes, remaining);
-    let read: { readonly content: string; readonly bytes: number; readonly truncated: boolean };
-    try {
-      read = await readBounded(
-        resolved.realPath ?? resolved.absolutePath,
-        limit,
-        stats.size,
-        options.signal,
-      );
-    } catch (error) {
-      if (error instanceof CancellationError) {
-        throw error;
-      }
-      skipped.push(Object.freeze({ raw: mention.raw, path: relativePath, reason: "unreadable" }));
-      continue;
-    }
-
-    seen.add(relativePath);
-    totalBytes += read.bytes;
-    attachments.push(
-      Object.freeze({
-        raw: mention.raw,
-        path: relativePath,
-        bytes: read.bytes,
-        truncated: read.truncated,
-        content: read.content,
-      }),
-    );
   }
 
   return Object.freeze({
@@ -258,6 +341,27 @@ async function resolveMentionPath(
       return undefined;
     }
     throw error;
+  }
+}
+
+async function isBinaryFile(
+  absolutePath: string,
+  relativePath: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (hasBinaryExtension(relativePath)) return true;
+  throwIfAborted(signal);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(absolutePath, "r");
+    const buffer = Buffer.alloc(BINARY_SAMPLE_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, BINARY_SAMPLE_BYTES, 0);
+    return isBinaryContent(buffer.subarray(0, bytesRead));
+  } catch {
+    // Treat an unreadable sample as text and let the bounded read report the real failure.
+    return false;
+  } finally {
+    await handle?.close();
   }
 }
 

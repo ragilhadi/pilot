@@ -27,6 +27,12 @@ export const PersistedModelSchema = z
     baseUrl: z.string().url().max(2_048).optional(),
     tools: z.boolean().default(true),
     vision: z.boolean().default(false),
+    /**
+     * The model's real context window. Without it Pilot falls back to the global
+     * `context.maxInputTokens`, which silently over-fills a small local model and under-fills a
+     * large one.
+     */
+    contextWindow: z.number().int().positive().max(10_000_000).optional(),
   })
   .strict();
 

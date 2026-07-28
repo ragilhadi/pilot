@@ -118,13 +118,84 @@ describe("resolveContextMentions", () => {
     expect(result.skipped[0]).toMatchObject({ path: "src/missing.ts", reason: "not-found" });
   });
 
-  it("skips directories", async () => {
+  it("attaches every eligible file inside a mentioned folder, recursively", async () => {
+    await writeFile(path.join(workspacePath, "src", "a.ts"), "alpha");
+    await mkdir(path.join(workspacePath, "src", "nested"), { recursive: true });
+    await writeFile(path.join(workspacePath, "src", "nested", "b.ts"), "beta");
+
     const result = await resolveContextMentions({
       text: "explore @src",
       boundary: await boundary(),
     });
+
+    expect(result.attachments.map(({ path: value }) => value)).toEqual([
+      "src/a.ts",
+      "src/nested/b.ts",
+    ]);
+    expect(result.augmentedText).toContain('<context path="src/nested/b.ts">');
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("never reads an ignored file inside a mentioned folder", async () => {
+    await writeFile(path.join(workspacePath, ".gitignore"), "secret.txt\n");
+    await writeFile(path.join(workspacePath, "src", "kept.ts"), "kept");
+    await writeFile(path.join(workspacePath, "src", "secret.txt"), "SHOULD NOT APPEAR");
+
+    const result = await resolveContextMentions({
+      text: "explore @src",
+      boundary: await boundary(),
+    });
+
+    expect(result.attachments.map(({ path: value }) => value)).toEqual(["src/kept.ts"]);
+    expect(result.augmentedText).not.toContain("SHOULD NOT APPEAR");
+  });
+
+  it("skips binary files rather than pasting mojibake into the prompt", async () => {
+    await writeFile(path.join(workspacePath, "src", "ok.ts"), "text");
+    await writeFile(path.join(workspacePath, "src", "logo.png"), Buffer.from([0x89, 0x50, 0x4e]));
+    await writeFile(path.join(workspacePath, "src", "blob.dat"), Buffer.from([0x61, 0x00, 0x62]));
+
+    const result = await resolveContextMentions({
+      text: "explore @src",
+      boundary: await boundary(),
+    });
+
+    expect(result.attachments.map(({ path: value }) => value)).toEqual(["src/ok.ts"]);
+    expect(result.skipped.map(({ path: value, reason }) => [value, reason])).toEqual([
+      ["src/blob.dat", "binary"],
+      ["src/logo.png", "binary"],
+    ]);
+  });
+
+  it("reports how many files a folder could not fit in the budget", async () => {
+    for (const name of ["a.ts", "b.ts", "c.ts"]) {
+      await writeFile(path.join(workspacePath, "src", name), name);
+    }
+
+    const result = await resolveContextMentions({
+      text: "explore @src",
+      boundary: await boundary(),
+      maxFiles: 2,
+    });
+
+    expect(result.attachments).toHaveLength(2);
+    expect(result.skipped[0]).toMatchObject({
+      path: "src",
+      reason: "budget-exceeded",
+      detail: "1 of 3 files not attached",
+    });
+  });
+
+  it("reports an empty folder without failing the turn", async () => {
+    await mkdir(path.join(workspacePath, "empty"), { recursive: true });
+
+    const result = await resolveContextMentions({
+      text: "explore @empty",
+      boundary: await boundary(),
+    });
+
     expect(result.attachments).toEqual([]);
-    expect(result.skipped[0]).toMatchObject({ path: "src", reason: "not-a-file" });
+    expect(result.skipped[0]).toMatchObject({ path: "empty", reason: "folder-empty" });
   });
 
   it("deduplicates a file referenced more than once", async () => {

@@ -1,4 +1,4 @@
-import { runId, sessionId } from "@pilotrun/core";
+import { AgentMessageSchema, runId, sessionId } from "@pilotrun/core";
 import { describe, expect, it, vi } from "vitest";
 import {
   ContextEngine,
@@ -210,9 +210,28 @@ describe("ContextEngine", () => {
     ]).prepare(collectionContext(), { maximumTokens: 100 });
     expect(result.selected[0]?.tokenEstimate).toMatchObject({
       tokens: expect.any(Number),
-      method: "utf8-bytes/3+4",
+      method: "utf8-bytes/4+4",
     });
     expect(result.selected[0]?.estimatedTokens).toBeGreaterThan(1);
+  });
+
+  it("estimates the wire payload, not the message envelope", () => {
+    const estimator = new Utf8HeuristicTokenEstimator();
+    const message = AgentMessageSchema.parse({
+      schemaVersion: 1,
+      id: "message-estimate",
+      sessionId: "session-estimate",
+      runId: "run-estimate",
+      role: "user",
+      status: "complete",
+      parts: [{ type: "text", text: "hello" }],
+      createdAt: "2026-07-22T05:00:00.000Z",
+      provenance: { kind: "user", channel: "cli" },
+    });
+
+    // Only "user\nhello" reaches the model; the ids, timestamp, provenance and JSON escaping used
+    // to be counted too, which inflated every candidate.
+    expect(estimator.estimate(message).tokens).toBe(estimator.estimate("user\nhello").tokens);
   });
 
   it("intersects configured/model limits before reserving output and fixed input", async () => {

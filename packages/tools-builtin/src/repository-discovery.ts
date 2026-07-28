@@ -6,6 +6,7 @@ import {
   type WorkspaceBoundary,
   type WorkspacePath,
 } from "@pilotrun/core";
+import { hasBinaryExtension, isBinaryContent } from "./binary-detection.js";
 import { type GitCommandRunner, type GitMetadata, inspectGitMetadata } from "./git-metadata.js";
 import { type IgnoreRuleSource, loadRepositoryIgnoreRules } from "./ignore-rules.js";
 import { WorkspacePathError } from "./workspace-boundary.js";
@@ -100,36 +101,6 @@ const generatedDirectoryNames = new Set([
   "node_modules",
 ]);
 const instructionNames = new Set(["AGENTS.md", "CLAUDE.md", "COPILOT.md", "GEMINI.md"]);
-const binaryExtensions = new Set([
-  ".7z",
-  ".avi",
-  ".bin",
-  ".bmp",
-  ".class",
-  ".dll",
-  ".doc",
-  ".docx",
-  ".exe",
-  ".gif",
-  ".gz",
-  ".ico",
-  ".jar",
-  ".jpeg",
-  ".jpg",
-  ".mov",
-  ".mp3",
-  ".mp4",
-  ".pdf",
-  ".png",
-  ".so",
-  ".tar",
-  ".wasm",
-  ".webp",
-  ".woff",
-  ".woff2",
-  ".zip",
-]);
-
 export class RepositoryDiscovery {
   readonly #boundary: WorkspaceBoundary;
   readonly #gitRunner: GitCommandRunner | undefined;
@@ -344,7 +315,7 @@ async function classifyFile(
   sampleBytes: number,
   signal?: AbortSignal,
 ): Promise<"binary" | "text"> {
-  if (binaryExtensions.has(path.extname(resolved.relativePath).toLocaleLowerCase("en-US"))) {
+  if (hasBinaryExtension(resolved.relativePath)) {
     return "binary";
   }
   throwIfCancelled(signal);
@@ -353,28 +324,10 @@ async function classifyFile(
   try {
     const buffer = Buffer.alloc(sampleBytes);
     const { bytesRead } = await handle.read(buffer, 0, sampleBytes, 0);
-    return isBinary(buffer.subarray(0, bytesRead)) ? "binary" : "text";
+    return isBinaryContent(buffer.subarray(0, bytesRead)) ? "binary" : "text";
   } finally {
     await handle.close();
   }
-}
-
-function isBinary(sample: Uint8Array): boolean {
-  if (sample.includes(0)) {
-    return true;
-  }
-  try {
-    new TextDecoder("utf-8", { fatal: true }).decode(sample);
-  } catch {
-    return true;
-  }
-  let suspicious = 0;
-  for (const byte of sample) {
-    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) {
-      suspicious += 1;
-    }
-  }
-  return sample.length > 0 && suspicious / sample.length > 0.3;
 }
 
 async function readRootPackageJson(
