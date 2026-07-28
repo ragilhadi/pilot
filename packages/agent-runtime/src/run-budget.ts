@@ -389,10 +389,14 @@ export class RunBudgetTracker {
     let outputTokens = 0;
     let estimatedCostUsd = 0;
     for (const record of this.#attempts.values()) {
-      inputTokens += chargedValue(
-        record.reservation.inputTokens,
-        record.usage?.inputTokens,
-        record.settled,
+      // Prompt tokens are cumulative by construction: every request re-sends the whole
+      // conversation, so each attempt's input count already contains the previous ones. Summing
+      // them multiplied the reported input by the number of cycles — a ten-cycle turn over a 30k
+      // conversation read as ~300k. The largest single request is the real peak. Output tokens and
+      // cost are genuinely per-attempt and still accumulate.
+      inputTokens = Math.max(
+        inputTokens,
+        chargedValue(record.reservation.inputTokens, record.usage?.inputTokens, record.settled),
       );
       outputTokens += chargedValue(
         record.reservation.outputTokens,

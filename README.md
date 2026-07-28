@@ -69,7 +69,12 @@ pilot chat --model ollama/deepseek-v4-flash:cloud
 `pilot models add` saves the model to `<data-dir>/models.json` (default `~/.pilot/models.json`),
 so it shows up in `pilot models` and is selectable from then on — no environment variables needed.
 Flags: `--provider` (default `ollama`), `--name`, `--base-url`, `--no-tools` (for models without
-tool-calling), and `--vision`. Remove one with `pilot models remove <model-id>`.
+tool-calling), `--vision`, and `--context-window N`. Remove one with
+`pilot models remove <model-id>`.
+
+Setting `--context-window` to the model's real window matters: without it Pilot falls back to the
+global `context.maxInputTokens`, which over-fills a small local model and under-uses a large one.
+It is also the denominator behind the `ctx 38k/128k (30%)` figure in the status line.
 
 For advanced setups (custom providers, credential references), additional OpenAI-compatible models
 can also be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON` (a JSON array of

@@ -1,9 +1,10 @@
-import type {
-  AgentMessage,
-  JsonObject,
-  JsonValue,
-  ModelRequest,
-  ToolCallPart,
+import {
+  type AgentMessage,
+  type JsonObject,
+  type JsonValue,
+  messageTextContent,
+  type ModelRequest,
+  type ToolCallPart,
 } from "@pilotrun/core";
 
 export interface OpenAIChatCompletionsRequest {
@@ -102,12 +103,12 @@ export function createChatCompletionsRequest(
 function toOpenAIMessage(message: AgentMessage): OpenAIMessage {
   switch (message.role) {
     case "system":
-      return Object.freeze({ role: "system", content: textContent(message) });
+      return Object.freeze({ role: "system", content: messageTextContent(message) });
     case "user":
       return userMessage(message);
     case "assistant": {
       const calls = message.parts.filter((part): part is ToolCallPart => part.type === "tool-call");
-      const content = textContent(message);
+      const content = messageTextContent(message);
       return Object.freeze({
         role: "assistant",
         content: content.length === 0 ? null : content,
@@ -146,7 +147,7 @@ function toOpenAIMessage(message: AgentMessage): OpenAIMessage {
 function userMessage(message: AgentMessage): OpenAIMessage {
   const hasImage = message.parts.some((part) => part.type === "image");
   if (!hasImage) {
-    return Object.freeze({ role: "user", content: textContent(message) });
+    return Object.freeze({ role: "user", content: messageTextContent(message) });
   }
 
   const content: OpenAIContentPart[] = [];
@@ -174,20 +175,6 @@ function userMessage(message: AgentMessage): OpenAIMessage {
     }
   }
   return Object.freeze({ role: "user", content: Object.freeze(content) });
-}
-
-function textContent(message: AgentMessage): string {
-  return message.parts
-    .flatMap((part) => {
-      if (part.type === "text") {
-        return [part.text];
-      }
-      if (part.type === "redacted") {
-        return ["[redacted]"];
-      }
-      return [];
-    })
-    .join("\n");
 }
 
 function serializeToolOutput(output: JsonValue): string {
