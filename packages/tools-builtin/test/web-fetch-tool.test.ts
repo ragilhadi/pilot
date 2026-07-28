@@ -75,6 +75,24 @@ describe("web_fetch tool", () => {
     expect(result.output.requestedUrl).toBe("https://example.com/docs");
   });
 
+  it("normalizes a pathological punctuation run in linear time", async () => {
+    // A model-supplied URL can be 4096 characters. The previous `/[.,;:!?'"]+$/` had no start
+    // anchor, so the engine retried from every position and degraded quadratically.
+    const requested: string[] = [];
+    const fetchImpl: FetchLike = async (target) => {
+      requested.push(target);
+      return textResponse("ok");
+    };
+    const url = `https://example.com/a${".".repeat(4_000)}`;
+
+    const startedAt = performance.now();
+    await tool(fetchImpl).execute({ url }, context());
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(requested).toEqual(["https://example.com/a"]);
+    expect(elapsedMs).toBeLessThan(1_000);
+  });
+
   it("keeps balanced parentheses that belong to the path", async () => {
     const requested: string[] = [];
     const fetchImpl: FetchLike = async (target) => {

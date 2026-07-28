@@ -191,15 +191,10 @@ export function createWebFetchTool(
  */
 export function normalizeRequestedUrl(rawUrl: string): string {
   let candidate = rawUrl.trim();
-  const autolink = /^<(.+)>$/su.exec(candidate);
-  if (autolink?.[1] !== undefined) candidate = autolink[1].trim();
-  // A URL that genuinely ends in one of these is vanishingly rare; a sentence that ends in one
-  // right after a URL is not.
-  candidate = candidate.replace(/[.,;:!?'"]+$/u, "");
-  // Only strip a closing bracket that has no opener, so real URLs keep their balanced parentheses.
-  while (/[)\]}]$/u.test(candidate) && !hasMatchingOpener(candidate)) {
-    candidate = candidate.slice(0, -1);
+  if (candidate.length > 2 && candidate.startsWith("<") && candidate.endsWith(">")) {
+    candidate = candidate.slice(1, -1).trim();
   }
+  candidate = trimTrailingSentencePunctuation(candidate);
   if (candidate.length === 0) {
     throw new WebFetchToolError(
       "PILOT_WEB_FETCH_INVALID_URL",
@@ -216,10 +211,43 @@ export function normalizeRequestedUrl(rawUrl: string): string {
   return candidate;
 }
 
-function hasMatchingOpener(value: string): boolean {
-  const closer = value.at(-1);
-  const opener = closer === ")" ? "(" : closer === "]" ? "[" : "{";
-  return value.slice(0, -1).includes(opener);
+/** Punctuation that ends a sentence far more often than it ends a URL. */
+const trailingPunctuation = new Set([".", ",", ";", ":", "!", "?", "'", '"']);
+const bracketPairs = new Map([
+  [")", "("],
+  ["]", "["],
+  ["}", "{"],
+]);
+
+/**
+ * Strips sentence punctuation and unmatched closing brackets from the end of a URL.
+ *
+ * Deliberately a single backward scan rather than `/[.,;:!?'"]+$/`: that regex has no start
+ * anchor, so the engine retries from every position and degrades quadratically on a long run of
+ * punctuation — a polynomial-ReDoS vector, since the URL comes straight from the model and may be
+ * up to 4096 characters. Opener presence is computed once up front for the same reason.
+ */
+function trimTrailingSentencePunctuation(value: string): string {
+  const seenOpeners = new Set<string>();
+  for (const character of value) {
+    if (character === "(" || character === "[" || character === "{") seenOpeners.add(character);
+  }
+  let end = value.length;
+  while (end > 0) {
+    const character = value[end - 1] ?? "";
+    if (trailingPunctuation.has(character)) {
+      end -= 1;
+      continue;
+    }
+    const opener = bracketPairs.get(character);
+    // Keep a closing bracket that belongs to the URL; drop one that closes nothing.
+    if (opener !== undefined && !seenOpeners.has(opener)) {
+      end -= 1;
+      continue;
+    }
+    break;
+  }
+  return value.slice(0, end);
 }
 
 async function followRedirects(
