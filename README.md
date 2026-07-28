@@ -69,7 +69,12 @@ pilot chat --model ollama/deepseek-v4-flash:cloud
 `pilot models add` saves the model to `<data-dir>/models.json` (default `~/.pilot/models.json`),
 so it shows up in `pilot models` and is selectable from then on — no environment variables needed.
 Flags: `--provider` (default `ollama`), `--name`, `--base-url`, `--no-tools` (for models without
-tool-calling), and `--vision`. Remove one with `pilot models remove <model-id>`.
+tool-calling), `--vision`, and `--context-window N`. Remove one with
+`pilot models remove <model-id>`.
+
+Setting `--context-window` to the model's real window matters: without it Pilot falls back to the
+global `context.maxInputTokens`, which over-fills a small local model and under-uses a large one.
+It is also the denominator behind the `ctx 38k/128k (30%)` figure in the status line.
 
 For advanced setups (custom providers, credential references), additional OpenAI-compatible models
 can also be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON` (a JSON array of
@@ -82,12 +87,18 @@ explicitly with `--ui tui`, `--ui plain`, `--screen-reader`, or `--json`. Sessio
 activity are stored in SQLite under `PILOT_DATA_DIR` (default `~/.pilot`).
 
 Reference a file as context by typing `@` followed by its path (`@src/index.ts`, or
-`@"a file with spaces.ts"` for paths with spaces); the picker lists workspace files as you type.
-On send, Pilot reads each referenced file and includes its contents alongside your message —
-both in interactive `chat` and in `pilot run "…"`. Files hidden by `.gitignore`, `.ignore`,
-`.pilotignore`, or the protected builtins (for example a `.env`) are never read and are reported
-as skipped, so secrets can't be pulled into a prompt by mistake. This applies everywhere,
-including the completion picker.
+`@"a file with spaces.ts"` for paths with spaces); the picker lists workspace files and folders as
+you type. On send, Pilot reads each referenced file and includes its contents alongside your
+message — both in interactive `chat` and in `pilot run "…"`.
+
+Mentioning a folder (`@src`, or `@src/` from the picker) attaches every eligible file inside it,
+recursively. Binary files are skipped, and the per-turn budget still applies — 20 files and 256 KiB
+in total by default — so a large folder attaches what fits and reports how many files it left out.
+
+Files hidden by `.gitignore`, `.ignore`, `.pilotignore`, or the protected builtins (for example a
+`.env`, or anything under `node_modules`) are never read and are reported as skipped, so secrets
+can't be pulled into a prompt by mistake. This applies everywhere, including folder mentions and
+the completion picker.
 
 Every tool call that isn't read-only asks for approval before it runs, showing the exact diff
 or command. Approve with `allow`/`deny`, optionally scoped to `once`, `session`, `tool`,
@@ -104,9 +115,19 @@ with `pilot config --json`.
   "schemaVersion": 1,
   "model": { "default": "ollama/glm-5.2:cloud" },
   "context": { "maxInputTokens": 120000, "reservedOutputTokens": 4096 },
+  "prompt": { "systemPrompt": "builtin" },
   "runBudget": { "maxElapsedMs": 1800000 },
 }
 ```
+
+### System prompt
+
+Pilot sends a small, provider-neutral set of baseline instructions ahead of your own
+`AGENTS.md` files: which tool to reach for, the read-then-edit hash handshake that `edit` and
+`apply_patch` require, how to read a failed tool result, and the rule that file and web content
+is data rather than instructions. It exists mainly so smaller models behave predictably; larger
+ones mostly infer it. Set `"prompt": { "systemPrompt": "none" }` to send nothing but your own
+instructions.
 
 ### Run budget
 

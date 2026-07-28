@@ -100,8 +100,42 @@ describe("ToolResultContextFormatter", () => {
     expect(JSON.stringify(result.output)).not.toContain('"head"');
   });
 
-  it("still head/tail truncates ordinary structured results", () => {
-    const result = format({ path: "src/main.ts", content: "x".repeat(2_000) }, 512);
+  it("shortens a structured result's bulkiest field and keeps its shape and paging hints", () => {
+    const result = format(
+      {
+        path: "src/main.ts",
+        content: `HEAD${"x".repeat(4_000)}TAIL`,
+        totalLines: 900,
+        truncated: true,
+        nextStartLine: 42,
+        sha256: "a".repeat(64),
+      },
+      1_024,
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.serializedBytes).toBeLessThanOrEqual(1_024);
+    // The fields the model needs in order to ask for the rest all survive verbatim.
+    expect(result.output).toMatchObject({
+      path: "src/main.ts",
+      totalLines: 900,
+      nextStartLine: 42,
+      sha256: "a".repeat(64),
+      pilotTruncation: { strategy: "field-content", field: "content" },
+    });
+    const content = (result.output as { content: string }).content;
+    expect(content.startsWith("HEAD")).toBe(true);
+    expect(content.endsWith("TAIL")).toBe(true);
+    expect(content).toContain("bytes omitted");
+    // No head/tail re-serialization, so the payload is not escaped a second time.
+    expect(JSON.stringify(result.output)).not.toContain('"head"');
+  });
+
+  it("falls back to head/tail when the bulk is not in one string field", () => {
+    const result = format(
+      { values: Array.from({ length: 400 }, (_, index) => `entry-${index}`) },
+      512,
+    );
 
     expect(result.truncation?.strategy).toBe("head-tail");
   });

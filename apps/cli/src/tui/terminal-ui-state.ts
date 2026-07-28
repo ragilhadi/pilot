@@ -89,9 +89,19 @@ export type TranscriptBlock =
   | TurnSummaryTranscriptBlock;
 
 export interface TerminalUsageState {
+  /**
+   * Prompt tokens for the most recent model request — i.e. how much of the context window the
+   * conversation currently occupies. This is a level, not a running total: every request re-sends
+   * the whole conversation, so summing it across turns would multiply the real figure.
+   */
   readonly inputTokens?: number;
+  /** Completion tokens generated during the current turn, reset when a new turn is submitted. */
   readonly outputTokens?: number;
   readonly estimatedCostUsd?: number;
+  /** The model's context window, when known, so the input figure can be shown as a fraction. */
+  readonly contextWindowTokens?: number;
+  /** True when the numbers are Pilot's estimate rather than the provider's own accounting. */
+  readonly estimated?: boolean;
 }
 
 export interface TerminalUiState {
@@ -165,6 +175,14 @@ export function reduceTerminalUi(
   if (action.type === "composer.submitted") {
     return {
       ...state,
+      // Output tokens and cost are per-turn; carrying the previous turn's figures forward made
+      // the footer look like it was accumulating when it was not.
+      usage: {
+        ...(state.usage.inputTokens === undefined ? {} : { inputTokens: state.usage.inputTokens }),
+        ...(state.usage.contextWindowTokens === undefined
+          ? {}
+          : { contextWindowTokens: state.usage.contextWindowTokens }),
+      },
       currentTurnBlockStart: state.currentTurnBlockStart ?? state.blocks.length,
       blocks: [
         ...state.blocks,
@@ -183,9 +201,14 @@ export function reduceTerminalUi(
         sessionId: event.sessionId,
         modelKey: event.payload.modelKey,
         phase: "ready",
+        usage: withContextWindow(sequencedState.usage, event.payload.contextWindowTokens),
       };
     case "chat.model.changed":
-      return { ...sequencedState, modelKey: event.payload.modelKey };
+      return {
+        ...sequencedState,
+        modelKey: event.payload.modelKey,
+        usage: withContextWindow(sequencedState.usage, event.payload.contextWindowTokens),
+      };
     case "chat.help":
       return appendNotice(
         sequencedState,
@@ -334,6 +357,10 @@ function reduceModelEvent(
         ...(event.usage.estimatedCostUsd === undefined
           ? {}
           : { estimatedCostUsd: event.usage.estimatedCostUsd }),
+        // Marks the figures as Pilot's own arithmetic when the provider reported none, so the
+        // footer can render them with a `~` instead of implying provider accounting.
+        // Explicitly false rather than absent, so a provider report clears a previous estimate.
+        estimated: event.usage.source !== "provider",
       },
     };
   }
@@ -672,6 +699,13 @@ function incompleteNotice(payload: {
     ? "the response above may be cut off"
     : "no response text was returned";
   return `${cause} — ${tail}.`;
+}
+
+function withContextWindow(
+  usage: TerminalUsageState,
+  contextWindowTokens: number | undefined,
+): TerminalUsageState {
+  return contextWindowTokens === undefined ? usage : { ...usage, contextWindowTokens };
 }
 
 function contextSummary(snapshot: PromptCompositionSnapshot): string {

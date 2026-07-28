@@ -37,6 +37,10 @@ const contextLayerSchema = z
   })
   .strict()
   .readonly();
+const promptLayerSchema = z
+  .object({ systemPrompt: z.enum(["builtin", "none"]).optional() })
+  .strict()
+  .readonly();
 const permissionsLayerSchema = z
   .object({ rules: z.array(PermissionRuleSchema).max(1_000).readonly().optional() })
   .strict()
@@ -60,6 +64,7 @@ export const ConfigurationLayerValueSchema = z
     model: modelLayerSchema.optional(),
     persistence: persistenceLayerSchema.optional(),
     context: contextLayerSchema.optional(),
+    prompt: promptLayerSchema.optional(),
     permissions: permissionsLayerSchema.optional(),
     runBudget: runBudgetLayerSchema.optional(),
     secrets: z.record(secretAlias, EnvironmentReferenceSchema).optional(),
@@ -105,6 +110,14 @@ export const PilotConfigurationSchema = z
         ({ maxInputTokens, reservedOutputTokens }) => reservedOutputTokens < maxInputTokens,
         "Output reservation must leave room for input context",
       )
+      .readonly(),
+    prompt: z
+      .object({
+        // "none" restores Pilot's original prompt-free behaviour, for users who want the model to
+        // see nothing but their own AGENTS.md files.
+        systemPrompt: z.enum(["builtin", "none"]),
+      })
+      .strict()
       .readonly(),
     permissions: z
       .object({ rules: z.array(PermissionRuleSchema).max(1_000).readonly() })

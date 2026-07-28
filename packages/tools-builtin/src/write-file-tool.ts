@@ -11,9 +11,21 @@ const emptyContentSha256 = createHash("sha256").update(Buffer.alloc(0)).digest("
 
 export const WriteFileInputSchema = z
   .object({
-    path: z.string().min(1).max(4_096),
-    content: z.string().max(1_000_000),
-    baseSha256: sha256Schema.optional(),
+    path: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .describe(
+        'Workspace-relative path to write, for example "src/new-module.ts". Parent directories ' +
+          "must already exist.",
+      ),
+    content: z.string().max(1_000_000).describe("The complete contents of the file."),
+    baseSha256: sha256Schema
+      .optional()
+      .describe(
+        "Omit to create a new file; the call fails if the path already exists. To replace an " +
+          "existing file's entire contents, pass the sha256 from a read_file of that file.",
+      ),
   })
   .strict()
   .readonly();
@@ -38,11 +50,15 @@ export function createWriteFileTool(
   journal: ChangeJournal,
 ): ToolDefinition<typeof WriteFileInputSchema, typeof WriteFileOutputSchema> {
   return defineTool({
-    name: "create_file",
+    name: "write_file",
     description:
-      "Write a whole UTF-8 workspace file. Without baseSha256 it creates a new file and fails if the " +
-      "path already exists. Pass the current baseSha256 to overwrite an existing file's entire " +
-      "contents, guarded by that hash. To change part of a file, prefer edit or apply_patch.",
+      "Create a new text file, or replace an existing file's entire contents.\n\n" +
+      "Use this only for new files. To change part of an existing file use edit (single localized " +
+      "change) or apply_patch (several changes at once) — rewriting a whole file to alter a few " +
+      "lines risks discarding content you have not read.\n\n" +
+      "Without baseSha256 this creates a new file and fails if the path already exists. To " +
+      "deliberately overwrite an existing file, read it first and pass its sha256 as baseSha256.\n\n" +
+      'Example: {"path": "src/new-module.ts", "content": "export const value = 1;\\n"}',
     inputSchema: WriteFileInputSchema,
     outputSchema: WriteFileOutputSchema,
     metadata: {

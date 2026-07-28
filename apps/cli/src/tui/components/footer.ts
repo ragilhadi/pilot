@@ -1,8 +1,22 @@
 import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
 import type { TerminalCapabilitySnapshot } from "../../presentation/presentation-mode.js";
 import { compactNumber, phaseLabel } from "../render-helpers.js";
-import type { TerminalUiState } from "../terminal-ui-state.js";
+import type { TerminalUiState, TerminalUsageState } from "../terminal-ui-state.js";
 import type { PilotTheme } from "../theme.js";
+
+/**
+ * Renders context occupancy as `ctx 38.4k/128k (30%)` — a level with a denominator, not a bare
+ * running number. The bare figure was the prompt tokens of the latest request, which readers
+ * naturally mistook for the cost of whatever tool had just run.
+ */
+function formatContextUsage(usage: TerminalUsageState): string | undefined {
+  if (usage.inputTokens === undefined) return undefined;
+  const prefix = usage.estimated === true ? "~" : "";
+  const used = `${prefix}${compactNumber(usage.inputTokens)}`;
+  if (usage.contextWindowTokens === undefined) return `ctx ${used}`;
+  const percent = Math.round((usage.inputTokens / usage.contextWindowTokens) * 100);
+  return `ctx ${used}/${compactNumber(usage.contextWindowTokens)} (${percent}%)`;
+}
 
 export class PilotFooter implements Component {
   readonly #state: () => TerminalUiState;
@@ -27,7 +41,8 @@ export class PilotFooter implements Component {
     const parts = [phaseLabel(state.phase, this.#capabilities.unicode)];
     if (state.activeToolCount > 0) parts.push(`${state.activeToolCount} tool`);
     if (state.queuedInputCount > 0) parts.push(`${state.queuedInputCount} queued`);
-    if (usage.inputTokens !== undefined) parts.push(`${compactNumber(usage.inputTokens)} in`);
+    const contextLabel = formatContextUsage(usage);
+    if (contextLabel !== undefined) parts.push(contextLabel);
     if (usage.outputTokens !== undefined) parts.push(`${compactNumber(usage.outputTokens)} out`);
     if (usage.estimatedCostUsd !== undefined) parts.push(`$${usage.estimatedCostUsd.toFixed(4)}`);
     const summary = state.lastTurnSummary;

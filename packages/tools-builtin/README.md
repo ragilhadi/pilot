@@ -5,7 +5,7 @@ coding-agent platform. This package implements the file, patch, search, shell, a
 agent uses to inspect and change a repository — each one boundary-checked, sandboxed to the
 workspace, and permission-gated.
 
-Included tools: `list_files`, `glob`, `grep`, `read_file`, `apply_patch`, `edit`, `create_file`,
+Included tools: `list_files`, `glob`, `grep`, `read_file`, `apply_patch`, `edit`, `write_file`,
 `run_command`, `git_status`, `git_diff`, `todo_write`, `todo_read`, and `web_fetch`. All reads and
 writes resolve through a workspace boundary (real-path containment, symlink-escape prevention)
 before touching the filesystem.
@@ -21,7 +21,7 @@ track progress across multi-step work. They mutate only in-session state (no wor
 or system side effects), so they are permission-free.
 
 The write surface offers three complementary primitives, all SHA-256-guarded and journal-backed:
-`create_file` (create a new file, or overwrite an existing one when its `baseSha256` is supplied),
+`write_file` (create a new file, or overwrite an existing one when its `baseSha256` is supplied),
 `edit` (replace an exact, unique string), and `apply_patch` (apply a unified diff).
 
 `grep` uses ripgrep, bundled via [`@vscode/ripgrep`](https://www.npmjs.com/package/@vscode/ripgrep),

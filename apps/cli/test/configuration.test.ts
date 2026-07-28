@@ -91,6 +91,15 @@ describe("CLI configuration loading", () => {
     expect(stderr.text()).toBe("");
   });
 
+  it("resolves the system-prompt setting, defaulting to the builtin prompt", () => {
+    expect(resolveConfiguration([]).configuration.prompt).toEqual({ systemPrompt: "builtin" });
+    expect(
+      resolveConfiguration([
+        { source: "project", location: "test", value: { prompt: { systemPrompt: "none" } } },
+      ]).configuration.prompt,
+    ).toEqual({ systemPrompt: "none" });
+  });
+
   it("displays scoped instruction trust, provenance, and precedence", async () => {
     const configuration = resolveConfiguration([]);
     const instructionDiscovery = new InstructionDiscovery({

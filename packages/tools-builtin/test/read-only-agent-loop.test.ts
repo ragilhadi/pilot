@@ -98,7 +98,7 @@ describe("read-only agent checkpoint", () => {
           isError: false,
           output: {
             path: "answer.txt",
-            content: "repository evidence\n",
+            content: "     1\trepository evidence\n",
             provenance: { source: "workspace-file", path: "answer.txt", untrusted: true },
           },
         },

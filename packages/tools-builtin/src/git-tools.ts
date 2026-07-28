@@ -19,8 +19,19 @@ const statusCodeSchema = z.string().length(2);
 
 export const GitStatusInputSchema = z
   .object({
-    paths: z.array(pathSchema).max(100).default([]).readonly(),
-    maxEntries: z.number().int().min(1).max(1_000).default(200),
+    paths: z
+      .array(pathSchema)
+      .max(100)
+      .default([])
+      .readonly()
+      .describe("Limit the status to these workspace-relative paths. Omit for the whole tree."),
+    maxEntries: z
+      .number()
+      .int()
+      .min(1)
+      .max(1_000)
+      .default(200)
+      .describe("Maximum changed entries to return."),
   })
   .strict()
   .readonly();
@@ -75,10 +86,33 @@ export const GitStatusOutputSchema = z
 
 export const GitDiffInputSchema = z
   .object({
-    scope: z.enum(["unstaged", "staged", "all"]).default("all"),
-    paths: z.array(pathSchema).max(100).default([]).readonly(),
-    contextLines: z.number().int().min(0).max(20).default(3),
-    maxOutputBytes: z.number().int().min(1_024).max(500_000).default(100_000),
+    scope: z
+      .enum(["unstaged", "staged", "all"])
+      .default("all")
+      .describe(
+        'Which changes to diff: "unstaged" (working tree), "staged" (index), or "all" (both, ' +
+          "the default).",
+      ),
+    paths: z
+      .array(pathSchema)
+      .max(100)
+      .default([])
+      .readonly()
+      .describe("Limit the diff to these workspace-relative paths. Omit for every changed file."),
+    contextLines: z
+      .number()
+      .int()
+      .min(0)
+      .max(20)
+      .default(3)
+      .describe("Lines of context around each hunk."),
+    maxOutputBytes: z
+      .number()
+      .int()
+      .min(1_024)
+      .max(500_000)
+      .default(100_000)
+      .describe("Maximum bytes of diff text before the result is marked truncated."),
   })
   .strict()
   .readonly();
@@ -142,7 +176,11 @@ export function createGitStatusTool(
 ): ToolDefinition<typeof GitStatusInputSchema, typeof GitStatusOutputSchema> {
   return defineTool({
     name: "git_status",
-    description: "Return bounded structured Git branch and working-tree status for the workspace.",
+    description:
+      "Show which files have been changed in the workspace, plus the current branch.\n\n" +
+      "Use it to see what you or the user have modified before deciding what to inspect or " +
+      "summarize. Pair it with git_diff to see the actual changes.\n\n" +
+      "Read-only: this never stages, commits, or otherwise changes the repository.",
     inputSchema: GitStatusInputSchema,
     outputSchema: GitStatusOutputSchema,
     metadata: {
@@ -200,7 +238,12 @@ export function createGitDiffTool(
   return defineTool({
     name: "git_diff",
     description:
-      "Return a bounded Git diff and structured numstat summary with external diff drivers disabled.",
+      "Show the actual content changes in the workspace as a diff, with per-file " +
+      "addition/deletion counts.\n\n" +
+      "Use it to review what changed before summarizing work or writing a commit message. Call " +
+      'git_status first if you only need the list of changed files. Pass "scope": "staged" to see ' +
+      "only what is staged.\n\n" +
+      "Read-only: this never stages, commits, or otherwise changes the repository.",
     inputSchema: GitDiffInputSchema,
     outputSchema: GitDiffOutputSchema,
     metadata: {

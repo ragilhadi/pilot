@@ -12,9 +12,27 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
 export const ApplyPatchInputSchema = z
   .object({
-    path: z.string().min(1).max(4_096),
-    baseSha256: sha256Schema,
-    patch: z.string().min(1).max(200_000),
+    path: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .describe(
+        "Workspace-relative path to the file to patch. Must match the path in the patch header.",
+      ),
+    baseSha256: sha256Schema.describe(
+      "The sha256 value from the read_file result for this exact file. Read the file first and " +
+        "copy its sha256 here; the patch is rejected if the file changed since that read.",
+    ),
+    patch: z
+      .string()
+      .min(1)
+      .max(200_000)
+      .describe(
+        "A unified diff for this one file. Must begin with '--- a/<path>' and '+++ b/<path>' " +
+          "lines, followed by one or more '@@' hunks. Context lines start with a space, removals " +
+          "with '-', additions with '+'. File creation, deletion, renames, and multi-file patches " +
+          "are not supported.",
+      ),
   })
   .strict()
   .readonly();
@@ -57,7 +75,15 @@ export function createApplyPatchTool(
   return defineTool({
     name: "apply_patch",
     description:
-      "Apply an approved, SHA-256-guarded unified diff to one existing UTF-8 workspace file using atomic replacement.",
+      "Apply a unified diff to one existing text file.\n\n" +
+      "Use this when a file needs several separate changes at once. For a single localized change " +
+      "prefer edit, which is easier to get right. To create a file use write_file — apply_patch " +
+      "cannot create, delete, or rename files, and cannot span more than one file.\n\n" +
+      "Workflow: call read_file first, copy its sha256 into baseSha256, then build the diff " +
+      "against exactly the content that read returned.\n\n" +
+      'Example: {"path": "src/app.ts", "baseSha256": "<sha256 from read_file>", "patch": ' +
+      '"--- a/src/app.ts\\n+++ b/src/app.ts\\n@@ -1,3 +1,3 @@\\n import x;\\n-const a = 1;\\n' +
+      '+const a = 2;\\n const b = 3;\\n"}',
     inputSchema: ApplyPatchInputSchema,
     outputSchema: ApplyPatchOutputSchema,
     metadata: {

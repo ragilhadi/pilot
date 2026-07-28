@@ -174,8 +174,11 @@ describe("MVP acceptance scenario", () => {
         }
 
         expect(model.calls).toHaveLength(9);
+        // messages[0] is Pilot's baseline system prompt; project instructions follow it.
         expect(model.calls[0]?.request.messages[0]).toMatchObject({ role: "system" });
-        expect(JSON.stringify(model.calls[0]?.request.messages[0])).toContain(
+        expect(JSON.stringify(model.calls[0]?.request.messages[0])).toContain("You are Pilot");
+        expect(model.calls[0]?.request.messages[1]).toMatchObject({ role: "system" });
+        expect(JSON.stringify(model.calls[0]?.request.messages[1])).toContain(
           "Run only the targeted validation test",
         );
         expect(model.calls[3]?.request.messages.at(-1)).toMatchObject({
