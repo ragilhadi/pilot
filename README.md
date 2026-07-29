@@ -10,6 +10,13 @@ you can resume them later.
 - Node.js 22.19 or newer
 - ripgrep (`rg`) on `PATH` for the built-in repository search tool
 
+Optional, for type diagnostics after every edit (`pilot doctor` reports what is missing):
+
+- TypeScript 5.x/6.x projects: `npm install -g typescript-language-server typescript`
+- Python: `npm install -g pyright`
+
+TypeScript 7 projects need nothing — Pilot uses the compiler the project already depends on.
+
 ## Install
 
 ```sh

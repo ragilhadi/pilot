@@ -31,6 +31,7 @@
     "@earendil-works/pi-tui": "catalog:",
     "@pilotrun/agent-runtime": "workspace:*",
     "@pilotrun/core": "workspace:*",
+    "@pilotrun/lsp": "workspace:*",
     "@pilotrun/persistence-sqlite": "workspace:*",
     "@pilotrun/provider-openai-compatible": "workspace:*",
     "@pilotrun/testkit": "workspace:*",

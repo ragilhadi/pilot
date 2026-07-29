@@ -37,6 +37,13 @@ const contextLayerSchema = z
   })
   .strict()
   .readonly();
+const diagnosticsLayerSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    timeoutMs: z.number().int().min(0).max(60_000).optional(),
+  })
+  .strict()
+  .readonly();
 const promptLayerSchema = z
   .object({ systemPrompt: z.enum(["builtin", "none"]).optional() })
   .strict()
@@ -74,6 +81,7 @@ export const ConfigurationLayerValueSchema = z
     model: modelLayerSchema.optional(),
     persistence: persistenceLayerSchema.optional(),
     context: contextLayerSchema.optional(),
+    diagnostics: diagnosticsLayerSchema.optional(),
     prompt: promptLayerSchema.optional(),
     permissions: permissionsLayerSchema.optional(),
     runBudget: runBudgetLayerSchema.optional(),
@@ -121,6 +129,18 @@ export const PilotConfigurationSchema = z
         ({ maxInputTokens, reservedOutputTokens }) => reservedOutputTokens < maxInputTokens,
         "Output reservation must leave room for input context",
       )
+      .readonly(),
+    diagnostics: z
+      .object({
+        // Language servers are optional: with `enabled: false` Pilot never spawns one and the
+        // edit tools behave exactly as they did before diagnostics existed.
+        enabled: z.boolean(),
+        // How long a write waits for diagnostics describing the content it just produced. A
+        // timeout yields no diagnostics rather than stale ones, so this trades latency for
+        // coverage, never for correctness.
+        timeoutMs: z.number().int().min(0).max(60_000),
+      })
+      .strict()
       .readonly(),
     prompt: z
       .object({

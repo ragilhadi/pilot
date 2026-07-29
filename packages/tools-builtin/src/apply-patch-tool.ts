@@ -7,6 +7,12 @@ import {
   UnifiedPatchError,
 } from "./unified-patch.js";
 import type { WorkspaceFileSystem } from "./workspace-file-system.js";
+import {
+  collectDiagnostics,
+  DiagnosticsReportSchema,
+  type DiagnosticsCollectorOptions,
+} from "./diagnostics-reporting.js";
+
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -61,6 +67,7 @@ export const ApplyPatchOutputSchema = z
     lineEndingsPreserved: z.boolean(),
     journalSequence: z.number().int().positive(),
     preview: ApplyPatchPreviewSchema,
+    diagnostics: DiagnosticsReportSchema.optional(),
   })
   .strict()
   .readonly();
@@ -71,6 +78,7 @@ export type ApplyPatchOutput = z.output<typeof ApplyPatchOutputSchema>;
 export function createApplyPatchTool(
   fileSystem: WorkspaceFileSystem,
   journal: ChangeJournal,
+  options: DiagnosticsCollectorOptions = {},
 ): ToolDefinition<typeof ApplyPatchInputSchema, typeof ApplyPatchOutputSchema> {
   return defineTool({
     name: "apply_patch",
@@ -121,6 +129,12 @@ export function createApplyPatchTool(
           { path: replacement.path },
         );
       }
+      const diagnostics = await collectDiagnostics(
+        options.port,
+        replacement.path,
+        applied.content,
+        context.signal,
+      );
       const entry = journal.recordApplied({
         runId: context.runId,
         callId: context.callId,
@@ -142,6 +156,7 @@ export function createApplyPatchTool(
           lineEndingsPreserved: applied.lineEndingsPreserved,
           journalSequence: entry.sequence,
           preview: applied.preview,
+          ...(diagnostics === undefined ? {} : { diagnostics }),
         }),
         metadata: {
           changed: true,

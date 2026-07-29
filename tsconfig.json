@@ -5,6 +5,7 @@
     { "path": "./packages/agent-runtime" },
     { "path": "./packages/provider-openai-compatible" },
     { "path": "./packages/persistence-sqlite" },
+    { "path": "./packages/lsp" },
     { "path": "./packages/tools-builtin" },
     { "path": "./packages/testkit" },
     { "path": "./apps/cli" },

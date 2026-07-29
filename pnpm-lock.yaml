@@ -48,6 +48,9 @@ importers:
       '@pilotrun/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@pilotrun/lsp':
+        specifier: workspace:*
+        version: link:../../packages/lsp
       '@pilotrun/persistence-sqlite':
         specifier: workspace:*
         version: link:../../packages/persistence-sqlite
@@ -103,6 +106,12 @@ importers:
       zod:
         specifier: 'catalog:'
         version: 4.4.3
+
+  packages/lsp:
+    dependencies:
+      '@pilotrun/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/persistence-sqlite:
     dependencies:

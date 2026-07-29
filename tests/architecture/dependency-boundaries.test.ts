@@ -37,6 +37,12 @@ const layerRules: readonly LayerRule[] = [
     allowNodeBuiltins: true,
   },
   {
+    packageName: "@pilotrun/lsp",
+    sourceDirectory: path.join(workspaceRoot, "packages/lsp/src"),
+    allowedPilotImports: new Set(["@pilotrun/core"]),
+    allowNodeBuiltins: true,
+  },
+  {
     packageName: "@pilotrun/tools-builtin",
     sourceDirectory: path.join(workspaceRoot, "packages/tools-builtin/src"),
     allowedPilotImports: new Set(["@pilotrun/core"]),

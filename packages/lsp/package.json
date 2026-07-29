@@ -1,0 +1,26 @@
+{
+  "name": "@pilotrun/lsp",
+  "version": "0.0.16",
+  "description": "Language-server diagnostics for the Pilot coding agent.",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@pilotrun/core": "workspace:*"
+  }
+}

@@ -38,7 +38,16 @@ export interface DoctorDependencies {
   readonly database?: SqliteDatabase;
   readonly providerCredentials: readonly ProviderCredentialDiagnostic[];
   readonly probeCommand: (kind: "git" | "shell") => Promise<boolean>;
+  /** Language servers Pilot can use, with whether their binary is on PATH. */
+  readonly languageServers?: readonly LanguageServerDiagnostic[];
   readonly checkWorkspaceAccess?: (path: string, mode: number) => Promise<void>;
+}
+
+export interface LanguageServerDiagnostic {
+  readonly id: string;
+  readonly command: string;
+  readonly installHint: string;
+  readonly available: boolean;
 }
 
 export class PilotDoctor {
@@ -69,6 +78,7 @@ export class PilotDoctor {
         "Configure an available system shell before using shell-mode commands",
       ),
     );
+    checks.push(...(await this.#languageServerChecks()));
     checks.push(
       await this.#measure("plugins", "Plugins", async () => ({
         status: "warn",
@@ -83,6 +93,28 @@ export class PilotDoctor {
       memoryRssBytes: this.#dependencies.memoryRssBytes(),
       checks: Object.freeze(checks),
     });
+  }
+
+  /**
+   * Language servers are optional, so a missing one warns rather than fails: Pilot works without
+   * it, the model just loses type feedback on that language and is told so explicitly.
+   */
+  async #languageServerChecks(): Promise<readonly DiagnosticCheck[]> {
+    const servers = this.#dependencies.languageServers ?? [];
+    if (servers.length === 0) return [];
+    return Promise.all(
+      servers.map((server) =>
+        this.#measure(`lsp:${server.id}`, `Diagnostics (${server.id})`, async () =>
+          server.available
+            ? { status: "pass", message: `${server.command} is available` }
+            : {
+                status: "warn",
+                message: `${server.command} is not on PATH; edits to these files report no diagnostics`,
+                remediation: `Install it with: ${server.installHint}`,
+              },
+        ),
+      ),
+    );
   }
 
   async #nodeCheck(): Promise<DiagnosticCheck> {

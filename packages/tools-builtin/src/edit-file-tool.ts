@@ -2,6 +2,12 @@ import { defineTool, PilotError, type ToolDefinition } from "@pilotrun/core";
 import * as z from "zod";
 import type { ChangeJournal } from "./change-journal.js";
 import type { WorkspaceFileSystem } from "./workspace-file-system.js";
+import {
+  collectDiagnostics,
+  DiagnosticsReportSchema,
+  type DiagnosticsCollectorOptions,
+} from "./diagnostics-reporting.js";
+
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -57,6 +63,7 @@ export const EditFileOutputSchema = z
     additions: z.number().int().nonnegative(),
     deletions: z.number().int().nonnegative(),
     journalSequence: z.number().int().positive(),
+    diagnostics: DiagnosticsReportSchema.optional(),
   })
   .strict()
   .readonly();
@@ -83,6 +90,7 @@ export class EditFileToolError extends PilotError {
 export function createEditFileTool(
   fileSystem: WorkspaceFileSystem,
   journal: ChangeJournal,
+  options: DiagnosticsCollectorOptions = {},
 ): ToolDefinition<typeof EditFileInputSchema, typeof EditFileOutputSchema> {
   return defineTool({
     name: "edit",
@@ -135,6 +143,12 @@ export function createEditFileTool(
         signal: context.signal,
       });
       const diff = computeLineDiff(original.content, content);
+      const diagnostics = await collectDiagnostics(
+        options.port,
+        replacement.path,
+        content,
+        context.signal,
+      );
       const entry = journal.recordApplied({
         runId: context.runId,
         callId: context.callId,
@@ -155,6 +169,7 @@ export function createEditFileTool(
           additions: diff.additions,
           deletions: diff.deletions,
           journalSequence: entry.sequence,
+          ...(diagnostics === undefined ? {} : { diagnostics }),
         }),
         metadata: {
           changed: true,

@@ -14,6 +14,9 @@ export const builtinConfiguration: PilotConfiguration = PilotConfigurationSchema
     maxInstructionTotalBytes: 524_288,
     maxToolResultBytes: 32_768,
   },
+  // Three seconds is comfortably above a warm re-check for both servers, and the cost is paid only
+  // on files a language server actually serves.
+  diagnostics: { enabled: true, timeoutMs: 3_000 },
   prompt: { systemPrompt: "builtin" },
   permissions: { rules: [] },
   runBudget: {
