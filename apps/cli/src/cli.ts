@@ -46,6 +46,7 @@ import {
 } from "@pilotrun/persistence-sqlite";
 import {
   createApplyPatchTool,
+  createQuestionTool,
   createTavilyWebSearchProvider,
   createBuiltinFileListTools,
   createEditFileTool,
@@ -70,6 +71,7 @@ import {
   ChatEventRenderer,
   formatContextAttachmentSummary,
 } from "./chat-events.js";
+import { CliUserClarification } from "./cli-user-clarification.js";
 import { CliUserInteraction } from "./cli-user-interaction.js";
 import { type PilotDoctor, renderDoctorReport } from "./diagnostics.js";
 import { builtinModelKeys, defaultCliModelKey } from "./model-catalog.js";
@@ -1081,6 +1083,9 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
             ),
           }),
         );
+  const clarification = new CliUserClarification((request) => {
+    emit({ type: "question.requested", sessionId: id, payload: { request } });
+  });
   const tools =
     dependencies.tools ??
     new ToolRegistry([
@@ -1095,6 +1100,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       createWriteFileTool(workspaceFileSystem, changeJournal),
       todoTools.todoWrite,
       todoTools.todoRead,
+      createQuestionTool(clarification),
       createWebFetchTool(),
       ...(webSearchTool === undefined ? [] : [webSearchTool]),
       createRunCommandTool(boundary, {
@@ -1549,6 +1555,17 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
         if (interaction.pendingRequest !== undefined) {
           queue.enqueue({ type: "cancel", reason: "user-cancelled" });
         }
+        // A question nobody can answer fails only that tool call, so the turn still finishes:
+        // the model continues on its own assumption rather than losing the work done so far.
+        const unansweredId = clarification.pendingRequest?.requestId;
+        clarification.close();
+        if (unansweredId !== undefined) {
+          emit({
+            type: "question.answered",
+            sessionId: id,
+            payload: { requestId: unansweredId, answer: "", unanswered: true },
+          });
+        }
         continue;
       }
       const followUpText = raced.line.trim();
@@ -1587,6 +1604,30 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
             sessionId: id,
             runId: runId(request.context.runId),
             payload: { requestId: request.requestId },
+          });
+        }
+        continue;
+      }
+
+      // A pending question owns the next line: it is an answer, not a follow-up prompt.
+      const pendingQuestion = clarification.pendingRequest;
+      const questionInput = clarification.respond(followUpText);
+      if (questionInput === "accepted") {
+        if (pendingQuestion !== undefined) {
+          emit({
+            type: "question.answered",
+            sessionId: id,
+            payload: { requestId: pendingQuestion.requestId, answer: followUpText },
+          });
+        }
+        continue;
+      }
+      if (questionInput === "invalid") {
+        if (pendingQuestion !== undefined) {
+          emit({
+            type: "question.response.invalid",
+            sessionId: id,
+            payload: { requestId: pendingQuestion.requestId },
           });
         }
         continue;

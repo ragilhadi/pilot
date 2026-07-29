@@ -383,4 +383,67 @@ describe("terminal UI reducer", () => {
       text: "The model reached its output token limit — no response text was returned.",
     });
   });
+  it("holds a pending question until it is answered", () => {
+    const ui = fixture();
+    ui.dispatch({ type: "chat.started", sessionId: id, payload: { modelKey: "fake/test" } });
+    ui.submit("Add a database adapter");
+    ui.dispatch({
+      type: "question.requested",
+      sessionId: id,
+      payload: {
+        request: {
+          requestId: "call-question",
+          question: "Which database?",
+          options: [{ label: "SQLite" }, { label: "Postgres" }],
+          allowsFreeformAnswer: true,
+        },
+      },
+    });
+
+    expect(ui.state().phase).toBe("awaiting-question");
+    expect(ui.state().pendingQuestion?.requestId).toBe("call-question");
+    expect(ui.state().blocks.at(-1)).toMatchObject({
+      kind: "notice",
+      tone: "info",
+      text: "Question: Which database?  1. SQLite  2. Postgres",
+    });
+
+    ui.dispatch({
+      type: "question.answered",
+      sessionId: id,
+      payload: { requestId: "call-question", answer: "Postgres" },
+    });
+
+    expect(ui.state().phase).toBe("running-tool");
+    expect(ui.state().pendingQuestion).toBeUndefined();
+    expect(ui.state().blocks.at(-1)).toMatchObject({ tone: "success", text: "Answered: Postgres" });
+  });
+
+  it("warns and clears the question when the input closes before an answer", () => {
+    const ui = fixture();
+    ui.dispatch({ type: "chat.started", sessionId: id, payload: { modelKey: "fake/test" } });
+    ui.dispatch({
+      type: "question.requested",
+      sessionId: id,
+      payload: {
+        request: {
+          requestId: "call-question",
+          question: "Which database?",
+          options: [],
+          allowsFreeformAnswer: true,
+        },
+      },
+    });
+    ui.dispatch({
+      type: "question.answered",
+      sessionId: id,
+      payload: { requestId: "call-question", answer: "", unanswered: true },
+    });
+
+    expect(ui.state().pendingQuestion).toBeUndefined();
+    expect(ui.state().blocks.at(-1)).toMatchObject({
+      tone: "warning",
+      text: "Question left unanswered; the model continues on its own assumption",
+    });
+  });
 });

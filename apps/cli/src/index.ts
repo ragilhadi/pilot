@@ -49,6 +49,11 @@ export {
   type ChatEvent,
   type ChatEventInput,
 } from "./chat-events.js";
+export {
+  ClarificationUnavailableError,
+  CliUserClarification,
+  type ClarificationInputResult,
+} from "./cli-user-clarification.js";
 export { CliUserInteraction, type PermissionInputResult } from "./cli-user-interaction.js";
 export type {
   ChatEventSink,

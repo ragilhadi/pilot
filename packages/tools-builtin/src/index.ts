@@ -160,6 +160,15 @@ export {
   type TodoWriteInput,
 } from "./todo-tools.js";
 export {
+  createQuestionTool,
+  QuestionInputSchema,
+  QuestionOutputSchema,
+  QuestionToolError,
+  type QuestionInput,
+  type QuestionOutput,
+  type QuestionToolOptions,
+} from "./question-tool.js";
+export {
   createWebFetchTool,
   normalizeRequestedUrl,
   WebFetchInputSchema,

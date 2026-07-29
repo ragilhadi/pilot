@@ -1,5 +1,6 @@
 import type {
   AgentMessage,
+  ClarificationRequest,
   Clock,
   FinishReason,
   JsonValue,
@@ -66,6 +67,12 @@ export type ChatEvent =
   | ChatEventBase<"command.output", { readonly event: CommandOutputEvent }>
   | ChatEventBase<"permission.requested", { readonly request: PermissionApprovalRequest }>
   | ChatEventBase<"permission.response.invalid", { readonly requestId: string }>
+  | ChatEventBase<"question.requested", { readonly request: ClarificationRequest }>
+  | ChatEventBase<"question.response.invalid", { readonly requestId: string }>
+  | ChatEventBase<
+      "question.answered",
+      { readonly requestId: string; readonly answer: string; readonly unanswered?: boolean }
+    >
   | ChatEventBase<
       "chat.turn.completed",
       {
@@ -205,6 +212,34 @@ export class ChatEventRenderer {
         this.#stderr.write(
           "Invalid approval response. Use allow or deny followed by an available scope.\n",
         );
+        break;
+      case "question.requested": {
+        const request = event.payload.request;
+        this.#stdout.write(`\n[question] ${sanitizeTerminalText(request.question)}\n`);
+        request.options.forEach((option, index) => {
+          const description =
+            option.description === undefined
+              ? ""
+              : ` — ${sanitizeTerminalText(option.description)}`;
+          const label = sanitizeTerminalText(option.label);
+          this.#stdout.write(`  ${index + 1}. ${label}${description}\n`);
+        });
+        this.#stdout.write(
+          request.options.length === 0
+            ? "Type your answer to continue.\n"
+            : `Answer with a number 1-${request.options.length}${
+                request.allowsFreeformAnswer ? ", or type your own answer" : ""
+              }.\n`,
+        );
+        break;
+      }
+      case "question.response.invalid":
+        this.#stderr.write("Invalid answer. Choose one of the listed options by number.\n");
+        break;
+      case "question.answered":
+        if (event.payload.unanswered) {
+          this.#stderr.write("[question unanswered: input closed]\n");
+        }
         break;
       case "chat.turn.completed":
         this.#stdout.write("\n");

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { Editor, Key, matchesKey, type Terminal, TUI } from "@earendil-works/pi-tui";
-import type { PermissionApprovalRequest } from "@pilotrun/core";
+import type { ClarificationRequest, PermissionApprovalRequest } from "@pilotrun/core";
 import type { ChatEvent } from "../chat-events.js";
 import type { InteractiveChatPresentation } from "../presentation/chat-presentation.js";
 import type { TerminalCapabilitySnapshot } from "../presentation/presentation-mode.js";
@@ -8,6 +8,7 @@ import { copyToClipboard } from "./clipboard.js";
 import { type CodeBlock, extractCodeBlocks } from "./code-blocks.js";
 import { DismissableDialog, overlayOptions, SelectionDialog } from "./components/dialogs.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
+import { QuestionDialog } from "./components/question-dialog.js";
 import { PilotFooter } from "./components/footer.js";
 import {
   PilotScreen,
@@ -81,6 +82,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   #closed = false;
   #submissionSequence = 0;
   #permissionOverlayRequestId: string | undefined;
+  #questionOverlay: { readonly requestId: string; readonly hide: () => void } | undefined;
   #lastIdleInterruptAt = Number.NEGATIVE_INFINITY;
   #themeMode: PilotThemeMode;
   #noticeSequence = 0;
@@ -145,6 +147,17 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     this.#state = reduceTerminalUi(this.#state, { type: "chat.event", event });
     if (event.type === "permission.requested") {
       this.#showPermissionOverlay(event.payload.request);
+    }
+    if (event.type === "question.requested") {
+      this.#showQuestionOverlay(event.payload.request);
+    }
+    if (
+      event.type === "question.answered" ||
+      event.type === "chat.turn.completed" ||
+      event.type === "chat.turn.aborted" ||
+      event.type === "chat.turn.failed"
+    ) {
+      this.#hideQuestionOverlay();
     }
     if (event.type === "chat.context" && event.payload.snapshot !== undefined) {
       this.#showContextOverlay(event.payload.snapshot);
@@ -581,6 +594,40 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     };
     dialog.onResponse = finish;
     dialog.onCancel = () => finish("deny once");
+  }
+
+  #showQuestionOverlay(request: ClarificationRequest): void {
+    // A question with no options is answered by typing, so an overlay would only steal the
+    // composer's focus; the transcript notice already carries the question.
+    if (request.options.length === 0) return;
+    if (this.#questionOverlay?.requestId === request.requestId) return;
+    this.#hideQuestionOverlay();
+    const dialog = new QuestionDialog(request, this.#theme);
+    const handle = this.#tui.showOverlay(dialog, {
+      width: "100%",
+      minWidth: 36,
+      maxHeight: "70%",
+      anchor: "bottom-center",
+      margin: { bottom: permissionDialogBottomMargin },
+    });
+    this.#questionOverlay = { requestId: request.requestId, hide: () => handle.hide() };
+    dialog.onResponse = (line) => {
+      this.#hideQuestionOverlay();
+      this.#enqueue(line);
+      this.#tui.requestRender();
+    };
+    // Dismissing does not answer: the question stays pending and the user can type a reply.
+    dialog.onDismiss = () => {
+      this.#hideQuestionOverlay();
+      this.#tui.requestRender();
+    };
+  }
+
+  #hideQuestionOverlay(): void {
+    const overlay = this.#questionOverlay;
+    if (overlay === undefined) return;
+    this.#questionOverlay = undefined;
+    overlay.hide();
   }
 }
 

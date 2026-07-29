@@ -749,6 +749,7 @@ describe("pilot chat", () => {
         "glob",
         "grep",
         "list_files",
+        "question",
         "read_file",
         "run_command",
         "todo_read",
@@ -806,6 +807,80 @@ describe("pilot chat", () => {
 
     expect(model.calls[0]?.request.tools.map(({ name }) => name)).toContain("web_search");
     expect(JSON.stringify(model.calls[0]?.request)).not.toContain("configured-search-key");
+  });
+
+  it("routes the next input line to a pending question instead of queueing it as a follow-up", async () => {
+    const model = new FakeLanguageModel({
+      providerId: "fake",
+      modelId: "question-tool",
+      scripts: [
+        toolCallScript({
+          responseId: "response-question",
+          callId: "call-question",
+          toolName: "question",
+          argumentDeltas: [
+            '{"question":"Which database should the adapter target?","options":[{"label":"SQLite"},{"label":"Postgres"}]}',
+          ],
+          completedInput: {
+            question: "Which database should the adapter target?",
+            options: [{ label: "SQLite" }, { label: "Postgres" }],
+          },
+        }),
+        textResponseScript({ responseId: "response-answered", deltas: ["Using Postgres"] }),
+      ],
+    });
+    let rendered: { readonly text: () => string } | undefined;
+    const stdin: LineReader = {
+      async readLine() {
+        if (!askedInitial) {
+          askedInitial = true;
+          return "Add a database adapter";
+        }
+        if (!answered) {
+          while (!(rendered?.text() ?? "").includes("[question]")) {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+          answered = true;
+          return "2";
+        }
+        const deadline = Date.now() + 20_000;
+        while (model.remainingScripts > 0 && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return "/exit";
+      },
+    };
+    let askedInitial = false;
+    let answered = false;
+    const { dependencies, stdout } = cliDependencies(
+      new ModelRegistry([{ model, displayName: "Question Tool Fake" }]),
+      new AbortController().signal,
+      stdin,
+    );
+    rendered = stdout;
+
+    expect(await runCli(["chat", "--model", "fake/question-tool"], dependencies)).toBe(0);
+
+    expect(model.calls[0]?.request.tools.map(({ name }) => name)).toContain("question");
+    expect(stdout.text()).toContain("Which database should the adapter target?");
+    // The answer resolved the tool call rather than being queued as a follow-up prompt.
+    expect(stdout.text()).not.toContain("[follow-up queued]");
+    const toolResult = model.calls[1]?.request.messages.at(-1);
+    expect(toolResult).toMatchObject({
+      role: "tool",
+      parts: [
+        {
+          type: "tool-result",
+          callId: "call-question",
+          isError: false,
+          output: {
+            answer: "Postgres",
+            selectedOption: { index: 1, label: "Postgres" },
+            freeform: false,
+          },
+        },
+      ],
+    });
   });
 
   it("runs multiple line-oriented turns against one in-memory session", async () => {
