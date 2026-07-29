@@ -172,6 +172,25 @@ export {
   type WebFetchToolOptions,
 } from "./web-fetch-tool.js";
 export {
+  createTavilyWebSearchProvider,
+  createWebSearchTool,
+  WebSearchFreshnessSchema,
+  WebSearchInputSchema,
+  WebSearchOutputSchema,
+  WebSearchResultSchema,
+  WebSearchToolError,
+  type TavilyWebSearchProviderOptions,
+  type WebSearchFetch,
+  type WebSearchFreshness,
+  type WebSearchInput,
+  type WebSearchOutput,
+  type WebSearchProvider,
+  type WebSearchProviderRequest,
+  type WebSearchProviderResponse,
+  type WebSearchResult,
+  type WebSearchToolOptions,
+} from "./web-search-tool.js";
+export {
   classifyCommandRisk,
   type CommandIntent,
   type CommandRiskClassification,

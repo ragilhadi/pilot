@@ -120,6 +120,22 @@ with `pilot config --json`.
 }
 ```
 
+To enable `web_search`, configure Tavily in the trusted global config only. Pilot resolves
+the API key at runtime and does not place it in the effective configuration, tool arguments, or
+tool results:
+
+```jsonc
+{
+  "webSearch": {
+    "provider": "tavily",
+    "apiKey": { "variable": "TAVILY_API_KEY" },
+  },
+}
+```
+
+`web_search` is omitted from the model's tool list when this section is absent. Repository and
+session configuration cannot select web-search credentials.
+
 ### System prompt
 
 Pilot sends a small, provider-neutral set of baseline instructions ahead of your own

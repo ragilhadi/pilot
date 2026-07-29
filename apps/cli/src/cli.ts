@@ -23,14 +23,17 @@ import {
   type AgentMessage,
   builtinConfiguration,
   type Clock,
+  ConfigurationError,
   type IdSource,
   type JsonValue,
   type EffectiveConfiguration,
+  type EnvironmentReference,
   messageId,
   parseAgentMessage,
   parseModelRequest,
   runId,
   type PersistenceRepositories,
+  resolveEnvironmentReference,
   SessionError,
   sessionId,
   toSafeErrorSnapshot,
@@ -43,6 +46,7 @@ import {
 } from "@pilotrun/persistence-sqlite";
 import {
   createApplyPatchTool,
+  createTavilyWebSearchProvider,
   createBuiltinFileListTools,
   createEditFileTool,
   createGrepTool,
@@ -51,6 +55,7 @@ import {
   createRunCommandTool,
   createTodoTools,
   createWebFetchTool,
+  createWebSearchTool,
   createWriteFileTool,
   InMemoryChangeJournal,
   InMemoryTodoStore,
@@ -115,6 +120,7 @@ export interface CliDependencies {
   readonly doctor?: PilotDoctor;
   readonly logger?: StructuredLogger;
   readonly chatRenderer?: ChatEventSink;
+  readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 interface ModelsCommand {
@@ -770,6 +776,19 @@ function missingSession(id: string): SessionError {
   );
 }
 
+function requireConfiguredSecret(
+  reference: EnvironmentReference,
+  environment: Readonly<Record<string, string | undefined>>,
+  configurationPath: string,
+): string {
+  const value = resolveEnvironmentReference(reference, environment);
+  if (value !== undefined && value.length > 0) return value;
+  throw new ConfigurationError(`Configuration ${configurationPath} resolved to an empty secret`, {
+    path: configurationPath,
+    variable: reference.variable,
+  });
+}
+
 function renderSession(snapshot: {
   readonly id: string;
   readonly revision: number;
@@ -1048,6 +1067,20 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   const workspaceFileSystem = new NodeWorkspaceFileSystem(boundary);
   const todoStore = new InMemoryTodoStore();
   const todoTools = createTodoTools(todoStore);
+  const environment = dependencies.environment ?? process.env;
+  const webSearchConfiguration = dependencies.configuration?.configuration.webSearch;
+  const webSearchTool =
+    webSearchConfiguration === undefined
+      ? undefined
+      : createWebSearchTool(
+          createTavilyWebSearchProvider({
+            apiKey: requireConfiguredSecret(
+              webSearchConfiguration.apiKey,
+              environment,
+              "webSearch.apiKey",
+            ),
+          }),
+        );
   const tools =
     dependencies.tools ??
     new ToolRegistry([
@@ -1063,8 +1096,9 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       todoTools.todoWrite,
       todoTools.todoRead,
       createWebFetchTool(),
+      ...(webSearchTool === undefined ? [] : [webSearchTool]),
       createRunCommandTool(boundary, {
-        environment: process.env,
+        environment,
         onOutput: (event, context) => {
           emit({
             type: "command.output",

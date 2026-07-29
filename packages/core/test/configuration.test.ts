@@ -268,4 +268,59 @@ describe("configuration resolution", () => {
     );
     expect(JSON.stringify(effective)).not.toContain("resolved-secret");
   });
+
+  it(
+    "accepts global web-search configuration and keeps the credential as an environment reference",
+    () => {
+      const effective = resolveConfiguration([
+        {
+          source: "global",
+          location: "global",
+          value: {
+            webSearch: {
+              provider: "tavily",
+              apiKey: { variable: "TAVILY_API_KEY" },
+            },
+          },
+        },
+      ]);
+
+      expect(effective.configuration.webSearch).toEqual({
+        provider: "tavily",
+        apiKey: { variable: "TAVILY_API_KEY", required: true },
+      });
+      expect(JSON.stringify(effective)).not.toContain("resolved-secret");
+    },
+  );
+
+  it("refuses repository-selected web-search credentials and optional API keys", () => {
+    expect(() =>
+      resolveConfiguration([
+        {
+          source: "project",
+          location: "project",
+          value: {
+            webSearch: {
+              provider: "tavily",
+              apiKey: { variable: "TAVILY_API_KEY" },
+            },
+          },
+        },
+      ]),
+    ).toThrowError(ConfigurationError);
+    expect(() =>
+      resolveConfiguration([
+        {
+          source: "global",
+          location: "global",
+          value: {
+            webSearch: {
+              provider: "tavily",
+              apiKey: { variable: "TAVILY_API_KEY", required: false },
+            },
+          },
+        },
+      ]),
+    ).toThrowError(ConfigurationError);
+  });
 });

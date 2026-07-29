@@ -772,6 +772,42 @@ describe("pilot chat", () => {
     }
   });
 
+  it("registers web_search only when a trusted credential reference is configured", async () => {
+    const model = new FakeLanguageModel({
+      providerId: "fake",
+      modelId: "web-search-tools",
+      scripts: [textResponseScript({ responseId: "response-search-tools", deltas: ["Ready"] })],
+    });
+    const registry = new ModelRegistry([{ model, displayName: "Web Search Tool Fake" }]);
+    const { dependencies } = cliDependencies(
+      registry,
+      new AbortController().signal,
+      timedLines([{ line: "Find current information" }, { line: "/exit", delayMs: 100 }]),
+    );
+
+    expect(
+      await runCli(["chat", "--model", "fake/web-search-tools"], {
+        ...dependencies,
+        environment: { TAVILY_API_KEY: "configured-search-key" },
+        configuration: resolveConfiguration([
+          {
+            source: "global",
+            location: "test",
+            value: {
+              webSearch: {
+                provider: "tavily",
+                apiKey: { variable: "TAVILY_API_KEY" },
+              },
+            },
+          },
+        ]),
+      }),
+    ).toBe(0);
+
+    expect(model.calls[0]?.request.tools.map(({ name }) => name)).toContain("web_search");
+    expect(JSON.stringify(model.calls[0]?.request)).not.toContain("configured-search-key");
+  });
+
   it("runs multiple line-oriented turns against one in-memory session", async () => {
     const registry = new ModelRegistry([
       {
