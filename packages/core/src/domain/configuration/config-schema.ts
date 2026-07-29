@@ -57,6 +57,16 @@ const runBudgetLayerSchema = z
   })
   .strict()
   .readonly();
+const webSearchSchema = z
+  .object({
+    provider: z.literal("tavily"),
+    apiKey: EnvironmentReferenceSchema.refine(
+      ({ required }) => required,
+      "The web-search API key environment reference must be required",
+    ),
+  })
+  .strict()
+  .readonly();
 
 export const ConfigurationLayerValueSchema = z
   .object({
@@ -67,6 +77,7 @@ export const ConfigurationLayerValueSchema = z
     prompt: promptLayerSchema.optional(),
     permissions: permissionsLayerSchema.optional(),
     runBudget: runBudgetLayerSchema.optional(),
+    webSearch: webSearchSchema.optional(),
     secrets: z.record(secretAlias, EnvironmentReferenceSchema).optional(),
   })
   .strict()
@@ -135,6 +146,7 @@ export const PilotConfigurationSchema = z
       })
       .strict()
       .readonly(),
+    webSearch: webSearchSchema.optional(),
     secrets: z.record(secretAlias, EnvironmentReferenceSchema).readonly(),
   })
   .strict()

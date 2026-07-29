@@ -160,6 +160,15 @@ export {
   type TodoWriteInput,
 } from "./todo-tools.js";
 export {
+  createQuestionTool,
+  QuestionInputSchema,
+  QuestionOutputSchema,
+  QuestionToolError,
+  type QuestionInput,
+  type QuestionOutput,
+  type QuestionToolOptions,
+} from "./question-tool.js";
+export {
   createWebFetchTool,
   normalizeRequestedUrl,
   WebFetchInputSchema,
@@ -171,6 +180,25 @@ export {
   type WebFetchOutput,
   type WebFetchToolOptions,
 } from "./web-fetch-tool.js";
+export {
+  createTavilyWebSearchProvider,
+  createWebSearchTool,
+  WebSearchFreshnessSchema,
+  WebSearchInputSchema,
+  WebSearchOutputSchema,
+  WebSearchResultSchema,
+  WebSearchToolError,
+  type TavilyWebSearchProviderOptions,
+  type WebSearchFetch,
+  type WebSearchFreshness,
+  type WebSearchInput,
+  type WebSearchOutput,
+  type WebSearchProvider,
+  type WebSearchProviderRequest,
+  type WebSearchProviderResponse,
+  type WebSearchResult,
+  type WebSearchToolOptions,
+} from "./web-search-tool.js";
 export {
   classifyCommandRisk,
   type CommandIntent,

@@ -6,15 +6,26 @@ agent uses to inspect and change a repository — each one boundary-checked, san
 workspace, and permission-gated.
 
 Included tools: `list_files`, `glob`, `grep`, `read_file`, `apply_patch`, `edit`, `write_file`,
-`run_command`, `git_status`, `git_diff`, `todo_write`, `todo_read`, and `web_fetch`. All reads and
-writes resolve through a workspace boundary (real-path containment, symlink-escape prevention)
-before touching the filesystem.
+`run_command`, `git_status`, `git_diff`, `todo_write`, `todo_read`, `question`, `web_fetch`, and
+`web_search`. All reads and writes resolve through a workspace boundary (real-path containment,
+symlink-escape prevention) before touching the filesystem.
 
 `web_fetch` retrieves a single http(s) URL and returns bounded, sanitized text (HTML is reduced to
 readable text). It is a network-risk, permission-gated tool with SSRF protection: only http(s) is
 allowed, embedded credentials are refused, and hosts that resolve to private, loopback, or
 link-local addresses (including cloud metadata endpoints) are blocked — re-checked on every
 redirect hop.
+
+`web_search` discovers public pages through an injected provider and returns a bounded, sanitized
+list of result titles, URLs, and snippets with untrusted provenance. The included Tavily
+adapter sends its key only in a Bearer-auth header, bounds the provider response before
+JSON parsing, and maps provider failures to safe typed errors. The CLI exposes the tool only when
+a global environment-secret reference is configured.
+
+`question` asks the user one question and blocks until they answer, through an injected
+`UserClarification` port (the CLI bridges it to the chat loop's input). Options are answered by
+number or label; when nobody can answer, the call fails as a non-retryable tool error so the model
+continues on a stated assumption instead of hanging. It changes nothing, so it is permission-free.
 
 `todo_write`/`todo_read` maintain a structured, in-session task list so the agent can plan and
 track progress across multi-step work. They mutate only in-session state (no workspace, network,
@@ -38,10 +49,16 @@ npm install @pilotrun/tools-builtin @pilotrun/core
 
 ```ts
 import {
+  createTavilyWebSearchProvider,
+  createWebSearchTool,
   NodeWorkspaceBoundary,
   loadRepositoryIgnoreRules,
   compileGlobPattern,
 } from "@pilotrun/tools-builtin";
+
+const webSearch = createWebSearchTool(
+  createTavilyWebSearchProvider({ apiKey: process.env.TAVILY_API_KEY! }),
+);
 ```
 
 The tool definitions conform to the tool port in `@pilotrun/core` and are registered with

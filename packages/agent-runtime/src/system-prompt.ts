@@ -119,6 +119,23 @@ export function composeSystemPrompt(input: SystemPromptInput): string {
     );
   }
 
+  if (has("question")) {
+    sections.push(
+      [
+        "# Asking the user",
+        "`question` puts one question to the user and waits for their answer. Reach for it only " +
+          "when you are actually blocked on a decision that is theirs — an ambiguous requirement " +
+          "whose readings lead to materially different work, or a choice with real trade-offs.",
+        "- Never ask what the repository can tell you. Search and read first.",
+        "- Never ask for permission to act; risky actions are approved separately.",
+        "- Supply `options` whenever the answer is one of a small known set.",
+        "- Do everything that does not depend on the answer before asking, and ask once.",
+        "- If the tool reports that no one can answer, pick the most reasonable reading, continue, " +
+          "and say which assumption you made.",
+      ].join("\n"),
+    );
+  }
+
   sections.push(
     [
       "# When a tool call fails",

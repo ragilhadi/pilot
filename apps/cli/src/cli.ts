@@ -23,14 +23,17 @@ import {
   type AgentMessage,
   builtinConfiguration,
   type Clock,
+  ConfigurationError,
   type IdSource,
   type JsonValue,
   type EffectiveConfiguration,
+  type EnvironmentReference,
   messageId,
   parseAgentMessage,
   parseModelRequest,
   runId,
   type PersistenceRepositories,
+  resolveEnvironmentReference,
   SessionError,
   sessionId,
   toSafeErrorSnapshot,
@@ -43,6 +46,8 @@ import {
 } from "@pilotrun/persistence-sqlite";
 import {
   createApplyPatchTool,
+  createQuestionTool,
+  createTavilyWebSearchProvider,
   createBuiltinFileListTools,
   createEditFileTool,
   createGrepTool,
@@ -51,6 +56,7 @@ import {
   createRunCommandTool,
   createTodoTools,
   createWebFetchTool,
+  createWebSearchTool,
   createWriteFileTool,
   InMemoryChangeJournal,
   InMemoryTodoStore,
@@ -65,6 +71,7 @@ import {
   ChatEventRenderer,
   formatContextAttachmentSummary,
 } from "./chat-events.js";
+import { CliUserClarification } from "./cli-user-clarification.js";
 import { CliUserInteraction } from "./cli-user-interaction.js";
 import { type PilotDoctor, renderDoctorReport } from "./diagnostics.js";
 import { builtinModelKeys, defaultCliModelKey } from "./model-catalog.js";
@@ -115,6 +122,7 @@ export interface CliDependencies {
   readonly doctor?: PilotDoctor;
   readonly logger?: StructuredLogger;
   readonly chatRenderer?: ChatEventSink;
+  readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 interface ModelsCommand {
@@ -770,6 +778,19 @@ function missingSession(id: string): SessionError {
   );
 }
 
+function requireConfiguredSecret(
+  reference: EnvironmentReference,
+  environment: Readonly<Record<string, string | undefined>>,
+  configurationPath: string,
+): string {
+  const value = resolveEnvironmentReference(reference, environment);
+  if (value !== undefined && value.length > 0) return value;
+  throw new ConfigurationError(`Configuration ${configurationPath} resolved to an empty secret`, {
+    path: configurationPath,
+    variable: reference.variable,
+  });
+}
+
 function renderSession(snapshot: {
   readonly id: string;
   readonly revision: number;
@@ -1048,6 +1069,23 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   const workspaceFileSystem = new NodeWorkspaceFileSystem(boundary);
   const todoStore = new InMemoryTodoStore();
   const todoTools = createTodoTools(todoStore);
+  const environment = dependencies.environment ?? process.env;
+  const webSearchConfiguration = dependencies.configuration?.configuration.webSearch;
+  const webSearchTool =
+    webSearchConfiguration === undefined
+      ? undefined
+      : createWebSearchTool(
+          createTavilyWebSearchProvider({
+            apiKey: requireConfiguredSecret(
+              webSearchConfiguration.apiKey,
+              environment,
+              "webSearch.apiKey",
+            ),
+          }),
+        );
+  const clarification = new CliUserClarification((request) => {
+    emit({ type: "question.requested", sessionId: id, payload: { request } });
+  });
   const tools =
     dependencies.tools ??
     new ToolRegistry([
@@ -1062,9 +1100,11 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       createWriteFileTool(workspaceFileSystem, changeJournal),
       todoTools.todoWrite,
       todoTools.todoRead,
+      createQuestionTool(clarification),
       createWebFetchTool(),
+      ...(webSearchTool === undefined ? [] : [webSearchTool]),
       createRunCommandTool(boundary, {
-        environment: process.env,
+        environment,
         onOutput: (event, context) => {
           emit({
             type: "command.output",
@@ -1515,6 +1555,17 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
         if (interaction.pendingRequest !== undefined) {
           queue.enqueue({ type: "cancel", reason: "user-cancelled" });
         }
+        // A question nobody can answer fails only that tool call, so the turn still finishes:
+        // the model continues on its own assumption rather than losing the work done so far.
+        const unansweredId = clarification.pendingRequest?.requestId;
+        clarification.close();
+        if (unansweredId !== undefined) {
+          emit({
+            type: "question.answered",
+            sessionId: id,
+            payload: { requestId: unansweredId, answer: "", unanswered: true },
+          });
+        }
         continue;
       }
       const followUpText = raced.line.trim();
@@ -1553,6 +1604,30 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
             sessionId: id,
             runId: runId(request.context.runId),
             payload: { requestId: request.requestId },
+          });
+        }
+        continue;
+      }
+
+      // A pending question owns the next line: it is an answer, not a follow-up prompt.
+      const pendingQuestion = clarification.pendingRequest;
+      const questionInput = clarification.respond(followUpText);
+      if (questionInput === "accepted") {
+        if (pendingQuestion !== undefined) {
+          emit({
+            type: "question.answered",
+            sessionId: id,
+            payload: { requestId: pendingQuestion.requestId, answer: followUpText },
+          });
+        }
+        continue;
+      }
+      if (questionInput === "invalid") {
+        if (pendingQuestion !== undefined) {
+          emit({
+            type: "question.response.invalid",
+            sessionId: id,
+            payload: { requestId: pendingQuestion.requestId },
           });
         }
         continue;

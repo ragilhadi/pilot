@@ -111,6 +111,17 @@ export function recoveryForToolError(code: PilotErrorCode): ToolRecovery {
         "This target or content is not supported and retrying the same call will fail again; " +
           "choose a different target or approach",
       );
+    case "PILOT_QUESTION_UNAVAILABLE":
+    case "PILOT_QUESTION_RESPONSE_INVALID":
+      return recovery(
+        "execution-failure",
+        "revise-request",
+        "none",
+        false,
+        "No answer is coming: nobody is available to answer questions in this session. Do not ask " +
+          "again. Choose the most reasonable interpretation, continue, and state the assumption " +
+          "you made in your final response",
+      );
     case "PILOT_TOOL_TIMEOUT":
       return recovery(
         "timeout",

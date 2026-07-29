@@ -1,4 +1,9 @@
-import type { JsonValue, PermissionApprovalRequest, SafeErrorSnapshot } from "@pilotrun/core";
+import type {
+  ClarificationRequest,
+  JsonValue,
+  PermissionApprovalRequest,
+  SafeErrorSnapshot,
+} from "@pilotrun/core";
 import type { PromptCompositionSnapshot, RunState } from "@pilotrun/agent-runtime";
 import type { ChatEvent } from "../chat-events.js";
 
@@ -8,6 +13,7 @@ export type TerminalUiPhase =
   | "streaming"
   | "running-tool"
   | "awaiting-permission"
+  | "awaiting-question"
   | "aborted"
   | "failed"
   | "ended";
@@ -114,6 +120,7 @@ export interface TerminalUiState {
   readonly activeToolCount: number;
   readonly queuedInputCount: number;
   readonly pendingPermission: PermissionApprovalRequest | undefined;
+  readonly pendingQuestion: ClarificationRequest | undefined;
   readonly showToolDetails: boolean;
   readonly showThinking: boolean;
   readonly currentTurnBlockStart: number | undefined;
@@ -142,6 +149,7 @@ export const initialTerminalUiState: TerminalUiState = Object.freeze({
   activeToolCount: 0,
   queuedInputCount: 0,
   pendingPermission: undefined,
+  pendingQuestion: undefined,
   showToolDetails: false,
   showThinking: false,
   currentTurnBlockStart: undefined,
@@ -254,6 +262,33 @@ export function reduceTerminalUi(
       };
     case "permission.response.invalid":
       return appendNotice(sequencedState, event, "danger", "Invalid permission response");
+    case "question.requested":
+      return {
+        ...appendNotice(sequencedState, event, "info", questionNotice(event.payload.request)),
+        phase: "awaiting-question",
+        pendingQuestion: event.payload.request,
+      };
+    case "question.response.invalid":
+      return appendNotice(
+        sequencedState,
+        event,
+        "danger",
+        "Invalid answer — choose one of the listed options",
+      );
+    case "question.answered":
+      return {
+        ...appendNotice(
+          sequencedState,
+          event,
+          event.payload.unanswered === true ? "warning" : "success",
+          event.payload.unanswered === true
+            ? "Question left unanswered; the model continues on its own assumption"
+            : `Answered: ${event.payload.answer}`,
+        ),
+        // The question tool is still executing until it returns the answer.
+        phase: "running-tool",
+        pendingQuestion: undefined,
+      };
     case "chat.turn.completed": {
       const summary = summarizeTurn(
         sequencedState.blocks.slice(sequencedState.currentTurnBlockStart ?? 0),
@@ -271,6 +306,7 @@ export function reduceTerminalUi(
         phase: "ready",
         queuedInputCount: 0,
         pendingPermission: undefined,
+        pendingQuestion: undefined,
         currentTurnBlockStart: undefined,
         lastTurnSummary: summary,
         blocks: [
@@ -299,6 +335,7 @@ export function reduceTerminalUi(
         ...appendNotice(sequencedState, event, "info", `Chat ended: ${event.payload.reason}`),
         phase: "ended",
         pendingPermission: undefined,
+        pendingQuestion: undefined,
       };
   }
 }
@@ -623,6 +660,7 @@ function abortedState(
     ...state,
     phase: "aborted",
     pendingPermission: undefined,
+    pendingQuestion: undefined,
     currentTurnBlockStart: undefined,
     activeToolCount: 0,
     lastTurnSummary: summary,
@@ -659,6 +697,7 @@ function failedState(
     phase: "failed",
     error: event.payload.error,
     pendingPermission: undefined,
+    pendingQuestion: undefined,
     currentTurnBlockStart: undefined,
     lastTurnSummary: summary,
     blocks: [...noticed.blocks, { kind: "summary", id: `summary:${event.sequence}`, summary }],
@@ -678,6 +717,7 @@ function incompleteState(
     phase: "ready",
     queuedInputCount: 0,
     pendingPermission: undefined,
+    pendingQuestion: undefined,
     currentTurnBlockStart: undefined,
   };
 }
@@ -706,6 +746,15 @@ function withContextWindow(
   contextWindowTokens: number | undefined,
 ): TerminalUsageState {
   return contextWindowTokens === undefined ? usage : { ...usage, contextWindowTokens };
+}
+
+function questionNotice(request: ClarificationRequest): string {
+  const options = request.options
+    .map((option, index) => `${index + 1}. ${option.label}`)
+    .join("  ");
+  return options.length === 0
+    ? `Question: ${request.question}`
+    : `Question: ${request.question}  ${options}`;
 }
 
 function contextSummary(snapshot: PromptCompositionSnapshot): string {
