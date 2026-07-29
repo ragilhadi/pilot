@@ -10,6 +10,13 @@ you can resume them later.
 - Node.js 22.19 or newer
 - ripgrep (`rg`) on `PATH` for the built-in repository search tool
 
+Optional, for type diagnostics after every edit (`pilot doctor` reports what is missing):
+
+- TypeScript 5.x/6.x projects: `npm install -g typescript-language-server typescript`
+- Python: `npm install -g pyright`
+
+TypeScript 7 projects need nothing — Pilot uses the compiler the project already depends on.
+
 ## Install
 
 ```sh
@@ -182,13 +189,12 @@ pnpm build
 
 ## Releasing
 
-Packages are versioned in lockstep. Each publishable package carries a `version` file (its
-source of truth, mirroring the [`vars/version`](https://github.com/ragilhadi/mimic) convention);
-`pnpm sync:versions` propagates those files into the `package.json` manifests, and `pnpm check`
-fails if the two ever drift. To cut a release:
+Packages are versioned in lockstep, with each package's `package.json` as the single source of
+truth. `pnpm release:version` writes one version across all of them, and `pnpm check` fails if they
+ever disagree. To cut a release:
 
 ```sh
-node scripts/set-version.mjs 0.2.0   # writes every package's version file and package.json
+pnpm release:version 0.2.0   # writes the version into every publishable package.json
 git commit -am "release: v0.2.0"
 git tag pilot-v0.2.0
 git push --follow-tags

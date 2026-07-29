@@ -10,21 +10,20 @@
   "packageManager": "pnpm@11.9.0",
   "scripts": {
     "build": "tsc -b --pretty false",
-    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm sync:versions:check",
+    "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm versions:check",
     "clean": "tsc -b --clean",
     "eval": "vitest run --config vitest.evals.config.ts",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "lint": "biome lint .",
     "link:global": "pnpm build && pnpm --filter @pilotrun/cli exec npm link",
-    "unlink:global": "pnpm --filter @pilotrun/cli exec npm unlink -g @pilotrun/cli",
+    "lint": "biome lint .",
     "package:smoke": "node scripts/package-smoke.mjs",
     "release:version": "node scripts/set-version.mjs",
-    "sync:versions": "node scripts/sync-versions.mjs",
-    "sync:versions:check": "node scripts/sync-versions.mjs --check",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --pretty false"
+    "typecheck": "tsc -b --pretty false",
+    "unlink:global": "pnpm --filter @pilotrun/cli exec npm unlink -g @pilotrun/cli",
+    "versions:check": "node scripts/check-versions.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.4",

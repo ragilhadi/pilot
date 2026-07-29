@@ -1,7 +1,7 @@
 {
-  "name": "@pilotrun/agent-runtime",
+  "name": "@pilotrun/lsp",
   "version": "0.0.17",
-  "description": "Deterministic agent orchestration runtime for Pilot: state machine, budgets, context, permissions.",
+  "description": "Language-server diagnostics for the Pilot coding agent.",
   "license": "MIT",
   "publishConfig": {
     "access": "public"
@@ -21,7 +21,6 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@pilotrun/core": "workspace:*",
-    "zod": "catalog:"
+    "@pilotrun/core": "workspace:*"
   }
 }

@@ -38,6 +38,7 @@ import {
   sessionId,
   toSafeErrorSnapshot,
   type ToolRisk,
+  type WorkspaceDiagnosticsPort,
   type WorkspaceBoundary,
 } from "@pilotrun/core";
 import {
@@ -45,8 +46,10 @@ import {
   type SqliteDatabase,
   type SqliteSessionAdministration,
 } from "@pilotrun/persistence-sqlite";
+import { LspDiagnosticsService } from "@pilotrun/lsp";
 import {
   createApplyPatchTool,
+  createDiagnosticsTool,
   createQuestionTool,
   createTavilyWebSearchProvider,
   createBuiltinFileListTools,
@@ -124,6 +127,7 @@ export interface CliDependencies {
   readonly logger?: StructuredLogger;
   readonly chatRenderer?: ChatEventSink;
   readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly diagnostics?: WorkspaceDiagnosticsPort;
 }
 
 interface ModelsCommand {
@@ -1087,6 +1091,23 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   const clarification = new CliUserClarification((request) => {
     emit({ type: "question.requested", sessionId: id, payload: { request } });
   });
+  // Language-server diagnostics. Servers start lazily on the first file that needs one, so a
+  // session that never edits TypeScript or Python never spawns anything.
+  const diagnosticsConfiguration = dependencies.configuration?.configuration.diagnostics;
+  const diagnosticsService =
+    dependencies.diagnostics ??
+    (diagnosticsConfiguration?.enabled === false
+      ? undefined
+      : new LspDiagnosticsService({
+          workspacePath: boundary.rootPath,
+          ...(diagnosticsConfiguration?.timeoutMs === undefined
+            ? {}
+            : { timeoutMs: diagnosticsConfiguration.timeoutMs }),
+          onUnavailable: (server, detail) => {
+            dependencies.logger?.log("info", "lsp.unavailable", { server: server.id, detail });
+          },
+        }));
+  const diagnosticsOptions = diagnosticsService === undefined ? {} : { port: diagnosticsService };
   const tools =
     dependencies.tools ??
     new ToolRegistry([
@@ -1096,9 +1117,12 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       gitTools.gitStatus,
       createGrepTool(boundary),
       createReadFileTool(boundary),
-      createApplyPatchTool(workspaceFileSystem, changeJournal),
-      createEditFileTool(workspaceFileSystem, changeJournal),
-      createWriteFileTool(workspaceFileSystem, changeJournal),
+      createApplyPatchTool(workspaceFileSystem, changeJournal, diagnosticsOptions),
+      createEditFileTool(workspaceFileSystem, changeJournal, diagnosticsOptions),
+      createWriteFileTool(workspaceFileSystem, changeJournal, diagnosticsOptions),
+      ...(diagnosticsService === undefined
+        ? []
+        : [createDiagnosticsTool(workspaceFileSystem, diagnosticsService)]),
       todoTools.todoWrite,
       todoTools.todoRead,
       createQuestionTool(clarification),
@@ -1423,300 +1447,310 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
     return pendingLine;
   };
 
-  while (!inputClosed) {
-    const line = await readLine();
-    pendingLine = undefined;
-    if (line === undefined) {
-      emit({ type: "chat.ended", sessionId: id, payload: { reason: "end-of-input" } });
-      return 0;
-    }
-    const text = line.trim();
-    if (text.length === 0) {
-      continue;
-    }
-    if (text === "/exit") {
-      emit({ type: "chat.ended", sessionId: id, payload: { reason: "user-exit" } });
-      return 0;
-    }
-    if (text === "/help") {
-      emit({
-        type: "chat.help",
-        sessionId: id,
-        payload: { commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"] },
-      });
-      continue;
-    }
-    if (text === "/context") {
-      emit({
-        type: "chat.context",
-        sessionId: id,
-        payload: {
-          ...(latestContextSnapshot === undefined ? {} : { snapshot: latestContextSnapshot }),
-        },
-      });
-      continue;
-    }
-    if (text === "/model" || text.startsWith("/model ")) {
-      const requestedModelKey = text.slice("/model".length).trim();
-      if (requestedModelKey.length === 0) {
-        dependencies.stderr.write(
-          `Usage: /model provider/model. Active model is ${activeModelKey}.\n`,
-        );
-        continue;
-      }
-      if (!dependencies.registry.has(requestedModelKey)) {
-        dependencies.stderr.write(
-          `Unknown model ${requestedModelKey}. Run pilot models to list available models.\n`,
-        );
-        continue;
-      }
-      activeModelKey = requestedModelKey;
-      emit({
-        type: "chat.model.changed",
-        sessionId: id,
-        payload: modelPayload(activeModelKey),
-      });
-      continue;
-    }
-    if (text === "/abort") {
-      continue;
-    }
-
-    const mentionContext = await resolveMentionContext(text, boundary, dependencies.signal);
-    if (mentionContext.attachments.length > 0 || mentionContext.skipped.length > 0) {
-      emit({
-        type: "chat.context.attached",
-        sessionId: id,
-        payload: {
-          attached: mentionContext.attachments.map(({ path, bytes, truncated }) => ({
-            path,
-            bytes,
-            truncated,
-          })),
-          skipped: mentionContext.skipped.map(({ path, reason, detail }) => ({
-            path,
-            reason,
-            ...(detail === undefined ? {} : { detail }),
-          })),
-        },
-      });
-    }
-
-    const queue = new RunInterruptionQueue();
-    const turnStartedAt = dependencies.monotonicNow?.() ?? performance.now();
-    // Resolve the per-response output-token cap: an explicit config override wins, otherwise the
-    // active model's declared capability, otherwise omit it entirely so the model uses its own
-    // default. A hardcoded cap previously starved reasoning models, which spend that budget on
-    // hidden thinking and can emit no text before hitting the limit.
-    const activeCapabilities = dependencies.registry.has(activeModelKey)
-      ? dependencies.registry.resolve(activeModelKey).descriptor.capabilities
-      : undefined;
-    const maxOutputTokens =
-      dependencies.configuration?.configuration.model.maxOutputTokens ??
-      activeCapabilities?.maxOutputTokens;
-    const turn = conversation.runTurn({
-      sessionId: id,
-      text: mentionContext.augmentedText,
-      channel: "cli",
-      modelKey: activeModelKey,
-      request: {
-        tools: tools.modelDefinitions(),
-        ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
-      },
-      retryPolicy: { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2_000, jitterRatio: 0.2 },
-      // The run budget bounds a single turn's agent loop. Cycle/attempt/tool
-      // counts are generous backstops against runaway iteration; wall-clock
-      // elapsed time is the meaningful limit. Per-request context size is
-      // bounded by context.maxInputTokens, so no cumulative token cap is set
-      // unless the user opts into one. All fields are tunable in config.jsonc.
-      budgetPolicy:
-        dependencies.configuration?.configuration.runBudget ?? builtinConfiguration.runBudget,
-      signal: dependencies.signal,
-      interruptionQueue: queue,
-      permissionContext: {
-        workspaceId: boundary.rootPath,
-        applicationId: "pilot-cli",
-      },
-    });
-    let exitRequested = false;
-    let turnResult: Awaited<typeof turn> | undefined;
-
-    while (turnResult === undefined) {
-      if (inputClosed) {
-        turnResult = await turn;
-        break;
-      }
-      const raced = await Promise.race([
-        turn.then((result) => ({ type: "turn" as const, result })),
-        readLine().then((nextLine) => ({ type: "line" as const, line: nextLine })),
-      ]);
-      if (raced.type === "turn") {
-        turnResult = raced.result;
-        break;
-      }
-
+  try {
+    while (!inputClosed) {
+      const line = await readLine();
       pendingLine = undefined;
-      if (raced.line === undefined) {
-        inputClosed = true;
-        if (interaction.pendingRequest !== undefined) {
+      if (line === undefined) {
+        emit({ type: "chat.ended", sessionId: id, payload: { reason: "end-of-input" } });
+        return 0;
+      }
+      const text = line.trim();
+      if (text.length === 0) {
+        continue;
+      }
+      if (text === "/exit") {
+        emit({ type: "chat.ended", sessionId: id, payload: { reason: "user-exit" } });
+        return 0;
+      }
+      if (text === "/help") {
+        emit({
+          type: "chat.help",
+          sessionId: id,
+          payload: {
+            commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"],
+          },
+        });
+        continue;
+      }
+      if (text === "/context") {
+        emit({
+          type: "chat.context",
+          sessionId: id,
+          payload: {
+            ...(latestContextSnapshot === undefined ? {} : { snapshot: latestContextSnapshot }),
+          },
+        });
+        continue;
+      }
+      if (text === "/model" || text.startsWith("/model ")) {
+        const requestedModelKey = text.slice("/model".length).trim();
+        if (requestedModelKey.length === 0) {
+          dependencies.stderr.write(
+            `Usage: /model provider/model. Active model is ${activeModelKey}.\n`,
+          );
+          continue;
+        }
+        if (!dependencies.registry.has(requestedModelKey)) {
+          dependencies.stderr.write(
+            `Unknown model ${requestedModelKey}. Run pilot models to list available models.\n`,
+          );
+          continue;
+        }
+        activeModelKey = requestedModelKey;
+        emit({
+          type: "chat.model.changed",
+          sessionId: id,
+          payload: modelPayload(activeModelKey),
+        });
+        continue;
+      }
+      if (text === "/abort") {
+        continue;
+      }
+
+      const mentionContext = await resolveMentionContext(text, boundary, dependencies.signal);
+      if (mentionContext.attachments.length > 0 || mentionContext.skipped.length > 0) {
+        emit({
+          type: "chat.context.attached",
+          sessionId: id,
+          payload: {
+            attached: mentionContext.attachments.map(({ path, bytes, truncated }) => ({
+              path,
+              bytes,
+              truncated,
+            })),
+            skipped: mentionContext.skipped.map(({ path, reason, detail }) => ({
+              path,
+              reason,
+              ...(detail === undefined ? {} : { detail }),
+            })),
+          },
+        });
+      }
+
+      const queue = new RunInterruptionQueue();
+      const turnStartedAt = dependencies.monotonicNow?.() ?? performance.now();
+      // Resolve the per-response output-token cap: an explicit config override wins, otherwise the
+      // active model's declared capability, otherwise omit it entirely so the model uses its own
+      // default. A hardcoded cap previously starved reasoning models, which spend that budget on
+      // hidden thinking and can emit no text before hitting the limit.
+      const activeCapabilities = dependencies.registry.has(activeModelKey)
+        ? dependencies.registry.resolve(activeModelKey).descriptor.capabilities
+        : undefined;
+      const maxOutputTokens =
+        dependencies.configuration?.configuration.model.maxOutputTokens ??
+        activeCapabilities?.maxOutputTokens;
+      const turn = conversation.runTurn({
+        sessionId: id,
+        text: mentionContext.augmentedText,
+        channel: "cli",
+        modelKey: activeModelKey,
+        request: {
+          tools: tools.modelDefinitions(),
+          ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
+        },
+        retryPolicy: { maxAttempts: 3, baseDelayMs: 250, maxDelayMs: 2_000, jitterRatio: 0.2 },
+        // The run budget bounds a single turn's agent loop. Cycle/attempt/tool
+        // counts are generous backstops against runaway iteration; wall-clock
+        // elapsed time is the meaningful limit. Per-request context size is
+        // bounded by context.maxInputTokens, so no cumulative token cap is set
+        // unless the user opts into one. All fields are tunable in config.jsonc.
+        budgetPolicy:
+          dependencies.configuration?.configuration.runBudget ?? builtinConfiguration.runBudget,
+        signal: dependencies.signal,
+        interruptionQueue: queue,
+        permissionContext: {
+          workspaceId: boundary.rootPath,
+          applicationId: "pilot-cli",
+        },
+      });
+      let exitRequested = false;
+      let turnResult: Awaited<typeof turn> | undefined;
+
+      while (turnResult === undefined) {
+        if (inputClosed) {
+          turnResult = await turn;
+          break;
+        }
+        const raced = await Promise.race([
+          turn.then((result) => ({ type: "turn" as const, result })),
+          readLine().then((nextLine) => ({ type: "line" as const, line: nextLine })),
+        ]);
+        if (raced.type === "turn") {
+          turnResult = raced.result;
+          break;
+        }
+
+        pendingLine = undefined;
+        if (raced.line === undefined) {
+          inputClosed = true;
+          if (interaction.pendingRequest !== undefined) {
+            queue.enqueue({ type: "cancel", reason: "user-cancelled" });
+          }
+          // A question nobody can answer fails only that tool call, so the turn still finishes:
+          // the model continues on its own assumption rather than losing the work done so far.
+          const unansweredId = clarification.pendingRequest?.requestId;
+          clarification.close();
+          if (unansweredId !== undefined) {
+            emit({
+              type: "question.answered",
+              sessionId: id,
+              payload: { requestId: unansweredId, answer: "", unanswered: true },
+            });
+          }
+          continue;
+        }
+        const followUpText = raced.line.trim();
+        if (followUpText.length === 0 || followUpText === "/help" || followUpText === "/context") {
+          if (followUpText === "/help") {
+            emit({
+              type: "chat.help",
+              sessionId: id,
+              payload: {
+                commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"],
+              },
+            });
+          }
+          if (followUpText === "/context") {
+            emit({
+              type: "chat.context",
+              sessionId: id,
+              payload: {
+                ...(latestContextSnapshot === undefined ? {} : { snapshot: latestContextSnapshot }),
+              },
+            });
+          }
+          continue;
+        }
+        if (followUpText === "/abort" || followUpText === "/exit") {
           queue.enqueue({ type: "cancel", reason: "user-cancelled" });
+          exitRequested = followUpText === "/exit";
+          continue;
         }
-        // A question nobody can answer fails only that tool call, so the turn still finishes:
-        // the model continues on its own assumption rather than losing the work done so far.
-        const unansweredId = clarification.pendingRequest?.requestId;
-        clarification.close();
-        if (unansweredId !== undefined) {
-          emit({
-            type: "question.answered",
-            sessionId: id,
-            payload: { requestId: unansweredId, answer: "", unanswered: true },
-          });
+
+        const permissionInput = interaction.respond(followUpText);
+        if (permissionInput === "accepted") continue;
+        if (permissionInput === "invalid") {
+          const request = interaction.pendingRequest;
+          if (request !== undefined) {
+            emit({
+              type: "permission.response.invalid",
+              sessionId: id,
+              runId: runId(request.context.runId),
+              payload: { requestId: request.requestId },
+            });
+          }
+          continue;
         }
-        continue;
-      }
-      const followUpText = raced.line.trim();
-      if (followUpText.length === 0 || followUpText === "/help" || followUpText === "/context") {
-        if (followUpText === "/help") {
-          emit({
-            type: "chat.help",
-            sessionId: id,
-            payload: {
-              commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"],
-            },
-          });
+
+        // A pending question owns the next line: it is an answer, not a follow-up prompt.
+        const pendingQuestion = clarification.pendingRequest;
+        const questionInput = clarification.respond(followUpText);
+        if (questionInput === "accepted") {
+          if (pendingQuestion !== undefined) {
+            emit({
+              type: "question.answered",
+              sessionId: id,
+              payload: { requestId: pendingQuestion.requestId, answer: followUpText },
+            });
+          }
+          continue;
         }
-        if (followUpText === "/context") {
-          emit({
-            type: "chat.context",
-            sessionId: id,
-            payload: {
-              ...(latestContextSnapshot === undefined ? {} : { snapshot: latestContextSnapshot }),
-            },
-          });
+        if (questionInput === "invalid") {
+          if (pendingQuestion !== undefined) {
+            emit({
+              type: "question.response.invalid",
+              sessionId: id,
+              payload: { requestId: pendingQuestion.requestId },
+            });
+          }
+          continue;
         }
-        continue;
-      }
-      if (followUpText === "/abort" || followUpText === "/exit") {
-        queue.enqueue({ type: "cancel", reason: "user-cancelled" });
-        exitRequested = followUpText === "/exit";
-        continue;
+
+        const queuedMessage = parseAgentMessage({
+          schemaVersion: 1,
+          id: messageId(dependencies.ids.next()),
+          sessionId: id,
+          runId: runId("queued-follow-up"),
+          role: "user",
+          status: "complete",
+          parts: [{ type: "text", text: followUpText }],
+          createdAt: dependencies.clock.now().toISOString(),
+          provenance: { kind: "user", channel: "cli" },
+        });
+        queue.enqueue({ type: "follow-up", message: queuedMessage });
+        emit({
+          type: "chat.input.queued",
+          sessionId: id,
+          payload: { messageId: queuedMessage.id },
+        });
       }
 
-      const permissionInput = interaction.respond(followUpText);
-      if (permissionInput === "accepted") continue;
-      if (permissionInput === "invalid") {
-        const request = interaction.pendingRequest;
-        if (request !== undefined) {
-          emit({
-            type: "permission.response.invalid",
-            sessionId: id,
-            runId: runId(request.context.runId),
-            payload: { requestId: request.requestId },
-          });
-        }
-        continue;
+      const lastRun = turnResult.runs.at(-1);
+      const turnDurationMs = Math.max(
+        0,
+        (dependencies.monotonicNow?.() ?? performance.now()) - turnStartedAt,
+      );
+      if (turnResult.assistantMessage !== undefined) {
+        emit({
+          type: "chat.turn.completed",
+          sessionId: id,
+          ...(lastRun === undefined ? {} : { runId: lastRun.runId }),
+          payload: {
+            runCount: turnResult.runs.length,
+            assistantMessage: turnResult.assistantMessage,
+            durationMs: turnDurationMs,
+          },
+        });
+      } else if (lastRun?.result.state.kind === "aborted") {
+        emit({
+          type: "chat.turn.aborted",
+          sessionId: id,
+          runId: lastRun.runId,
+          payload: { state: lastRun.result.state, durationMs: turnDurationMs },
+        });
+      } else if (lastRun?.result.state.kind === "failed") {
+        emit({
+          type: "chat.turn.failed",
+          sessionId: id,
+          runId: lastRun.runId,
+          payload: { error: lastRun.result.state.error, durationMs: turnDurationMs },
+        });
       }
 
-      // A pending question owns the next line: it is an answer, not a follow-up prompt.
-      const pendingQuestion = clarification.pendingRequest;
-      const questionInput = clarification.respond(followUpText);
-      if (questionInput === "accepted") {
-        if (pendingQuestion !== undefined) {
-          emit({
-            type: "question.answered",
-            sessionId: id,
-            payload: { requestId: pendingQuestion.requestId, answer: followUpText },
-          });
-        }
-        continue;
-      }
-      if (questionInput === "invalid") {
-        if (pendingQuestion !== undefined) {
-          emit({
-            type: "question.response.invalid",
-            sessionId: id,
-            payload: { requestId: pendingQuestion.requestId },
-          });
-        }
-        continue;
+      if (turnResult.incomplete !== undefined) {
+        emit({
+          type: "chat.turn.incomplete",
+          sessionId: id,
+          runId: turnResult.incomplete.runId,
+          payload: {
+            reason: turnResult.incomplete.reason,
+            finishReason: turnResult.incomplete.finishReason,
+            hasPartialText: turnResult.incomplete.hasPartialText,
+            durationMs: turnDurationMs,
+          },
+        });
       }
 
-      const queuedMessage = parseAgentMessage({
-        schemaVersion: 1,
-        id: messageId(dependencies.ids.next()),
-        sessionId: id,
-        runId: runId("queued-follow-up"),
-        role: "user",
-        status: "complete",
-        parts: [{ type: "text", text: followUpText }],
-        createdAt: dependencies.clock.now().toISOString(),
-        provenance: { kind: "user", channel: "cli" },
-      });
-      queue.enqueue({ type: "follow-up", message: queuedMessage });
-      emit({
-        type: "chat.input.queued",
-        sessionId: id,
-        payload: { messageId: queuedMessage.id },
-      });
+      if (exitRequested || inputClosed) {
+        emit({
+          type: "chat.ended",
+          sessionId: id,
+          payload: { reason: exitRequested ? "user-exit" : "end-of-input" },
+        });
+        return 0;
+      }
     }
 
-    const lastRun = turnResult.runs.at(-1);
-    const turnDurationMs = Math.max(
-      0,
-      (dependencies.monotonicNow?.() ?? performance.now()) - turnStartedAt,
-    );
-    if (turnResult.assistantMessage !== undefined) {
-      emit({
-        type: "chat.turn.completed",
-        sessionId: id,
-        ...(lastRun === undefined ? {} : { runId: lastRun.runId }),
-        payload: {
-          runCount: turnResult.runs.length,
-          assistantMessage: turnResult.assistantMessage,
-          durationMs: turnDurationMs,
-        },
-      });
-    } else if (lastRun?.result.state.kind === "aborted") {
-      emit({
-        type: "chat.turn.aborted",
-        sessionId: id,
-        runId: lastRun.runId,
-        payload: { state: lastRun.result.state, durationMs: turnDurationMs },
-      });
-    } else if (lastRun?.result.state.kind === "failed") {
-      emit({
-        type: "chat.turn.failed",
-        sessionId: id,
-        runId: lastRun.runId,
-        payload: { error: lastRun.result.state.error, durationMs: turnDurationMs },
-      });
-    }
-
-    if (turnResult.incomplete !== undefined) {
-      emit({
-        type: "chat.turn.incomplete",
-        sessionId: id,
-        runId: turnResult.incomplete.runId,
-        payload: {
-          reason: turnResult.incomplete.reason,
-          finishReason: turnResult.incomplete.finishReason,
-          hasPartialText: turnResult.incomplete.hasPartialText,
-          durationMs: turnDurationMs,
-        },
-      });
-    }
-
-    if (exitRequested || inputClosed) {
-      emit({
-        type: "chat.ended",
-        sessionId: id,
-        payload: { reason: exitRequested ? "user-exit" : "end-of-input" },
-      });
-      return 0;
+    return 0;
+  } finally {
+    // Language servers are long-lived subprocesses holding memory proportional to project size.
+    // They outlive the chat loop unless the session tears them down on every exit path.
+    if (diagnosticsService instanceof LspDiagnosticsService) {
+      await diagnosticsService.shutdown();
     }
   }
-
-  return 0;
 }
 
 /**
