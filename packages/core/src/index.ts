@@ -195,6 +195,15 @@ export {
   type ToolSchemaIssue,
   type ToolSchemaOutput,
 } from "./domain/tool/index.js";
+export {
+  ClarificationOptionSchema,
+  ClarificationRequestSchema,
+  ClarificationResponseSchema,
+  type ClarificationOption,
+  type ClarificationRequest,
+  type ClarificationResponse,
+  type UserClarification,
+} from "./domain/clarification/index.js";
 export { ToolRecoverySchema, type ToolRecovery } from "./domain/recovery.js";
 export {
   builtinConfiguration,
