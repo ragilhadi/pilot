@@ -83,10 +83,12 @@ export type {
 export {
   AgentIdSchema,
   AgentMessageSchema,
+  agentMessageWireText,
   ImagePartSchema,
   MessageIdSchema,
   MessagePartSchema,
   MessageProvenanceSchema,
+  messageTextContent,
   parseAgentMessage,
   RedactedPartSchema,
   RunIdSchema,
@@ -173,6 +175,8 @@ export {
 } from "./domain/permission/index.js";
 export {
   defineTool,
+  extractSchemaIssues,
+  parseToolCallArguments,
   parseToolInput,
   parseToolOutput,
   ToolContractError,
@@ -180,6 +184,7 @@ export {
   ToolRiskSchema,
   toolToModelDefinition,
   type AnyToolSchema,
+  type ToolArgumentsParse,
   type ToolContractViolation,
   type ToolDefinition,
   type ToolDefinitionInput,
@@ -187,6 +192,7 @@ export {
   type ToolExecutionResult,
   type ToolMetadata,
   type ToolRisk,
+  type ToolSchemaIssue,
   type ToolSchemaOutput,
 } from "./domain/tool/index.js";
 export { ToolRecoverySchema, type ToolRecovery } from "./domain/recovery.js";

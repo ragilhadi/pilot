@@ -13,27 +13,70 @@ import * as z from "zod";
 
 const defaultMaximumFileBytes = 5_000_000;
 const hardMaximumFileBytes = 10_000_000;
-const defaultMaximumContentBytes = 100_000;
+/**
+ * A default read used to be able to return 100 KB in a single tool result, which dominated the
+ * context window and made one `read_file` look like it cost tens of thousands of tokens. Bound it
+ * by lines first — the unit the model actually reasons in — and keep the byte cap as a backstop.
+ */
+const defaultMaximumLines = 2_000;
+const defaultMaximumContentBytes = 40_000;
 const hardMaximumContentBytes = 100_000;
+/** Keeps one minified or generated line from consuming the entire result. */
+const maximumLineCharacters = 2_000;
 const readChunkBytes = 65_536;
 
 export const ReadFileInputSchema = z
   .object({
-    path: z.string().min(1).max(4_096),
-    startLine: z.number().int().positive().default(1),
-    endLine: z.number().int().positive().optional(),
+    path: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .describe(
+        'Workspace-relative path to the file, for example "src/index.ts". Absolute paths and ' +
+          "paths outside the workspace are rejected.",
+      ),
+    startLine: z
+      .number()
+      .int()
+      .positive()
+      .default(1)
+      .describe(
+        "First line to return, 1-based. When a previous call reported truncated: true, pass its " +
+          "nextStartLine here to continue from where it stopped.",
+      ),
+    endLine: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Last line to return, 1-based and inclusive. Omit to read to the end of the file, " +
+          "subject to the output size limit.",
+      ),
     maxFileSizeBytes: z
       .number()
       .int()
       .positive()
       .max(hardMaximumFileBytes)
-      .default(defaultMaximumFileBytes),
+      .default(defaultMaximumFileBytes)
+      .describe("Refuse to open files larger than this. Rarely worth setting."),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(10_000)
+      .default(defaultMaximumLines)
+      .describe(
+        "Maximum number of lines to return in one call. Defaults to 2000; lower it to sample a " +
+          "large file cheaply.",
+      ),
     maxContentBytes: z
       .number()
       .int()
       .min(1_024)
       .max(hardMaximumContentBytes)
-      .default(defaultMaximumContentBytes),
+      .default(defaultMaximumContentBytes)
+      .describe("Byte backstop on the returned content. The line limit usually binds first."),
   })
   .strict()
   .refine(
@@ -64,8 +107,10 @@ export const ReadFileOutputSchema = z
     encoding: z.literal("utf-8"),
     hasBom: z.boolean(),
     lineEnding: z.enum(["lf", "crlf", "cr", "mixed", "none"]),
+    /** Every content line is prefixed with its 1-based number and a tab, like `cat -n`. */
+    contentFormat: z.literal("numbered-lines"),
     truncated: z.boolean(),
-    truncationReason: z.literal("output-bytes").optional(),
+    truncationReason: z.enum(["output-bytes", "line-limit"]).optional(),
     nextStartLine: z.number().int().positive().optional(),
     lineTruncated: z.boolean(),
     sanitizedCharacters: z.number().int().nonnegative(),
@@ -110,7 +155,17 @@ export function createReadFileTool(
   return defineTool({
     name: "read_file",
     description:
-      "Read a bounded UTF-8 line range from a workspace file with a full-file content hash and explicit provenance.",
+      "Read the contents of a UTF-8 text file in the workspace.\n\n" +
+      "Use this before editing any file. The result's sha256 is the hash of the whole file, and " +
+      "edit and apply_patch both require it as baseSha256 — so always read a file immediately " +
+      "before you change it, and use the sha256 from that read.\n\n" +
+      "Each returned line is prefixed with its line number and a tab, like `cat -n`. The gutter " +
+      "is NOT part of the file: when copying text into edit's oldString or into an apply_patch " +
+      "hunk, strip the number and the tab and copy only what follows.\n\n" +
+      "To find files, use glob or grep first; do not guess paths. To read a specific region, pass " +
+      "startLine and endLine. Returns at most 2000 lines per call; if the result has " +
+      "truncated: true, call again with startLine set to the returned nextStartLine.\n\n" +
+      'Example: {"path": "src/index.ts", "startLine": 1, "endLine": 120}',
     inputSchema: ReadFileInputSchema,
     outputSchema: ReadFileOutputSchema,
     metadata: {
@@ -162,8 +217,11 @@ export function createReadFileTool(
         encoding: "utf-8",
         hasBom,
         lineEnding: detectLineEnding(text),
+        contentFormat: "numbered-lines",
         truncated: selected.truncated,
-        ...(selected.truncated ? { truncationReason: "output-bytes" as const } : {}),
+        ...(selected.truncationReason === undefined
+          ? {}
+          : { truncationReason: selected.truncationReason }),
         ...(selected.nextStartLine === undefined ? {} : { nextStartLine: selected.nextStartLine }),
         lineTruncated: selected.lineTruncated,
         sanitizedCharacters: selected.sanitizedCharacters,
@@ -188,7 +246,9 @@ interface SelectedContent {
   readonly endLine: number;
   readonly totalLines: number;
   readonly truncated: boolean;
+  readonly truncationReason?: "output-bytes" | "line-limit";
   readonly nextStartLine?: number;
+  /** True when at least one returned line was clipped, not only when the result ends mid-line. */
   readonly lineTruncated: boolean;
   readonly sanitizedCharacters: number;
 }
@@ -267,50 +327,82 @@ function assertTextContent(bytes: Buffer, text: string): void {
   }
 }
 
+/** `cat -n` style gutter: a right-aligned line number, a tab, then the line's text. */
+function lineNumberPrefix(lineNumber: number): string {
+  return `${String(lineNumber).padStart(6, " ")}\t`;
+}
+
 function selectContent(text: string, input: ReadFileInput): SelectedContent {
-  const characters: string[] = [];
+  const rendered: string[] = [];
   let usedBytes = 0;
   let endLine = 0;
   let totalLines = 0;
+  let returnedLines = 0;
   let sanitizedCharacters = 0;
   let lineTruncated = false;
   let truncated = false;
+  let truncationReason: SelectedContent["truncationReason"];
   let nextStartLine: number | undefined;
 
-  const consumeLine = (line: string, lineNumber: number) => {
+  const stopAt = (lineNumber: number, reason: NonNullable<SelectedContent["truncationReason"]>) => {
+    truncated = true;
+    truncationReason ??= reason;
+    nextStartLine ??= lineNumber;
+  };
+
+  const consumeLine = (line: string, lineNumber: number, terminator: string) => {
     if (
       lineNumber < input.startLine ||
       (input.endLine !== undefined && lineNumber > input.endLine) ||
-      lineTruncated
+      truncated
     ) {
       return;
     }
-    if (usedBytes >= input.maxContentBytes) {
-      truncated = true;
-      nextStartLine ??= lineNumber;
+    if (returnedLines >= input.limit) {
+      stopAt(lineNumber, "line-limit");
       return;
     }
-    let addedCharacter = false;
+
+    const safeCharacters: string[] = [];
     for (const character of line) {
+      if (safeCharacters.length >= maximumLineCharacters) {
+        // A single very long line is clipped rather than allowed to fill the whole budget.
+        safeCharacters.push("…");
+        lineTruncated = true;
+        break;
+      }
       const codePoint = character.codePointAt(0) ?? 0;
       const unsafe = isUnsafeControl(codePoint);
-      const safeCharacter = unsafe ? "�" : character;
-      const characterBytes = Buffer.byteLength(safeCharacter, "utf8");
-      if (usedBytes + characterBytes > input.maxContentBytes) {
-        truncated = true;
-        if (addedCharacter) {
-          lineTruncated = true;
-          endLine = lineNumber;
-        } else {
-          nextStartLine ??= lineNumber;
-        }
-        return;
-      }
-      characters.push(safeCharacter);
-      usedBytes += characterBytes;
-      addedCharacter = true;
+      safeCharacters.push(unsafe ? "�" : character);
       if (unsafe) sanitizedCharacters += 1;
     }
+
+    // The file's own terminator is preserved, so text copied out of a CRLF file still matches it
+    // byte for byte when it comes back through edit's oldString.
+    const entry = `${lineNumberPrefix(lineNumber)}${safeCharacters.join("")}${terminator}`;
+    const entryBytes = Buffer.byteLength(entry, "utf8");
+    if (usedBytes + entryBytes > input.maxContentBytes) {
+      // Always return something, so a tiny byte budget cannot produce an empty result whose
+      // nextStartLine points back at the same line forever.
+      if (returnedLines > 0) {
+        stopAt(lineNumber, "output-bytes");
+        return;
+      }
+      const overhead = lineNumberPrefix(lineNumber).length + terminator.length;
+      const room = Math.max(0, input.maxContentBytes - overhead);
+      const clipped = truncateUtf8Characters(safeCharacters.join(""), room);
+      const clippedEntry = `${lineNumberPrefix(lineNumber)}${clipped}${terminator}`;
+      rendered.push(clippedEntry);
+      usedBytes += Buffer.byteLength(clippedEntry, "utf8");
+      returnedLines += 1;
+      endLine = lineNumber;
+      lineTruncated = true;
+      stopAt(lineNumber + 1, "output-bytes");
+      return;
+    }
+    rendered.push(entry);
+    usedBytes += entryBytes;
+    returnedLines += 1;
     endLine = lineNumber;
   };
 
@@ -319,26 +411,42 @@ function selectContent(text: string, input: ReadFileInput): SelectedContent {
     for (let index = 0; index < text.length; index += 1) {
       const character = text[index];
       if (character !== "\r" && character !== "\n") continue;
-      if (character === "\r" && text[index + 1] === "\n") index += 1;
+      const terminatorEnd = character === "\r" && text[index + 1] === "\n" ? index + 2 : index + 1;
       totalLines += 1;
-      consumeLine(text.slice(lineStart, index + 1), totalLines);
-      lineStart = index + 1;
+      consumeLine(text.slice(lineStart, index), totalLines, text.slice(index, terminatorEnd));
+      index = terminatorEnd - 1;
+      lineStart = terminatorEnd;
     }
     if (lineStart < text.length) {
       totalLines += 1;
-      consumeLine(text.slice(lineStart), totalLines);
+      consumeLine(text.slice(lineStart), totalLines, "");
     }
   }
 
+  // nextStartLine is only meaningful while there is more file left to read.
+  const hasMore = nextStartLine !== undefined && nextStartLine <= totalLines;
   return Object.freeze({
-    content: characters.join(""),
+    content: rendered.join(""),
     endLine,
     totalLines,
     truncated,
-    ...(nextStartLine === undefined ? {} : { nextStartLine }),
+    ...(truncationReason === undefined ? {} : { truncationReason }),
+    ...(hasMore && nextStartLine !== undefined ? { nextStartLine } : {}),
     lineTruncated,
     sanitizedCharacters,
-  });
+  }) satisfies SelectedContent;
+}
+
+function truncateUtf8Characters(value: string, maximumBytes: number): string {
+  const characters: string[] = [];
+  let bytes = 0;
+  for (const character of value) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maximumBytes) break;
+    characters.push(character);
+    bytes += size;
+  }
+  return characters.join("");
 }
 
 function isUnsafeControl(codePoint: number): boolean {

@@ -89,6 +89,36 @@ describe("WorkspaceFileAutocompleteProvider", () => {
     expect(applied.cursorCol).toBe("explain @src/context-mention.ts ".length);
   });
 
+  it("offers folders derived from the file listing", async () => {
+    const runner = new FakeRipgrepRunner(["src/tui/theme.ts", "src/tui/screen.ts"]);
+    const provider = new WorkspaceFileAutocompleteProvider({ basePath: "/repo", runner });
+
+    const result = await provider.getSuggestions(["@tui"], 0, 4, { signal });
+
+    // `rg --files` never emits directories, so they are synthesised from the listed paths.
+    expect(result?.items).toContainEqual({
+      value: "@src/tui/",
+      label: "tui/",
+      description: "src/tui/  (folder)",
+    });
+  });
+
+  it("leaves a folder mention open so the user can keep descending", async () => {
+    const runner = new FakeRipgrepRunner([]);
+    const provider = new WorkspaceFileAutocompleteProvider({ basePath: "/repo", runner });
+
+    const applied = provider.applyCompletion(
+      ["explain @sr"],
+      0,
+      11,
+      { value: "@src/tui/", label: "tui/" },
+      "@sr",
+    );
+
+    expect(applied.lines[0]).toBe("explain @src/tui/");
+    expect(applied.cursorCol).toBe("explain @src/tui/".length);
+  });
+
   it("caches the file listing within the TTL window", async () => {
     let time = 0;
     let runCount = 0;

@@ -2,6 +2,7 @@ import {
   ApplicationRunner,
   ConversationModelRequestContextPreparer,
   ContextEngineError,
+  createSystemPromptContextSource,
   InMemorySessionRepository,
   type InstructionDiscovery,
   type InstructionTarget,
@@ -15,6 +16,7 @@ import {
   ThrottledRunCheckpointWriter,
   ToolResultContextFormatter,
   ToolRegistry,
+  Utf8HeuristicTokenEstimator,
   type PromptCompositionSnapshot,
 } from "@pilotrun/agent-runtime";
 import {
@@ -189,6 +191,7 @@ const usage = `Usage:
   pilot doctor [--json]
   pilot models [--json]
   pilot models add MODEL_ID [--provider P] [--name NAME] [--base-url URL] [--no-tools] [--vision]
+                            [--context-window N]
   pilot models remove MODEL_ID [--provider P]
   pilot config [--json]
   pilot instructions [--json] [FILE ...] [--directory DIR]
@@ -432,6 +435,7 @@ function parseModelsAddCommand(args: readonly string[]): ModelsCommand {
   let baseUrl: string | undefined;
   let tools = true;
   let vision = false;
+  let contextWindow: number | undefined;
   let json = false;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -460,6 +464,15 @@ function parseModelsAddCommand(args: readonly string[]): ModelsCommand {
       case "--vision":
         vision = true;
         break;
+      case "--context-window": {
+        const raw = optionValue("--context-window");
+        const parsed = Number(raw);
+        if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+          throw new CliUsageError("--context-window requires a positive integer");
+        }
+        contextWindow = parsed;
+        break;
+      }
       case "--json":
         json = true;
         break;
@@ -484,6 +497,7 @@ function parseModelsAddCommand(args: readonly string[]): ModelsCommand {
         vision,
         ...(displayName === undefined ? {} : { displayName }),
         ...(baseUrl === undefined ? {} : { baseUrl }),
+        ...(contextWindow === undefined ? {} : { contextWindow }),
       },
     },
   });
@@ -1084,6 +1098,17 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   const toolStartedAt = new Map<string, number>();
   let latestContextSnapshot: PromptCompositionSnapshot | undefined;
   const configuredContext = dependencies.configuration?.configuration.context;
+  const sharedTokenEstimator = new Utf8HeuristicTokenEstimator();
+  /** Once a provider reports real usage, stop publishing Pilot's own estimate. */
+  let providerUsageSeen = false;
+  const systemPromptContextSource: ContextSource | undefined =
+    dependencies.configuration?.configuration.prompt.systemPrompt === "none"
+      ? undefined
+      : createSystemPromptContextSource({
+          workspacePath: boundary.rootPath,
+          platform: process.platform,
+          toolNames: tools.list().map(({ definition }) => definition.name),
+        });
   const instructionContextSource: ContextSource | undefined =
     dependencies.instructionDiscovery === undefined
       ? undefined
@@ -1138,8 +1163,17 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
                 dependencies.configuration?.configuration.persistence.checkpointIntervalMs ?? 250,
             },
           ),
+    // One estimator for the whole app. This used to be a third, independent heuristic
+    // (chars / 4 over the serialized messages) that disagreed with both the context engine and
+    // the provider's reported usage.
     estimateModelCall: ({ request }) => ({
-      inputTokens: Math.max(1, Math.ceil(JSON.stringify(request.messages).length / 4)),
+      inputTokens: Math.max(
+        1,
+        request.messages.reduce(
+          (total, message) => total + sharedTokenEstimator.estimate(message).tokens,
+          0,
+        ),
+      ),
       outputTokens: request.maxOutputTokens ?? 4_096,
     }),
     retry: { random: Math.random, sleep: abortableDelay },
@@ -1150,19 +1184,43 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
     contextPreparer: new ConversationModelRequestContextPreparer({
       configuredContextTokens: configuredContext?.maxInputTokens ?? 120_000,
       reservedOutputTokens: configuredContext?.reservedOutputTokens ?? 4_096,
+      tokenEstimator: sharedTokenEstimator,
       now: () => dependencies.clock.now().toISOString(),
-      ...(instructionContextSource === undefined
-        ? {}
-        : { additionalSources: [instructionContextSource], targetPaths: ["."] }),
+      ...(() => {
+        const sources = [systemPromptContextSource, instructionContextSource].filter(
+          (source): source is ContextSource => source !== undefined,
+        );
+        return sources.length === 0 ? {} : { additionalSources: sources, targetPaths: ["."] };
+      })(),
     }),
     onContextPrepared: (snapshot) => {
       latestContextSnapshot = snapshot;
+      // Some OpenAI-compatible servers never report usage. Rather than leaving the footer blank,
+      // publish the composed estimate — marked as an estimate — so there is always a figure.
+      if (!providerUsageSeen) {
+        emit({
+          type: "model.stream",
+          sessionId: id,
+          runId: runId(snapshot.runId),
+          payload: {
+            event: {
+              type: "usage.updated",
+              sequence: 0,
+              responseId: `context:${snapshot.cycle}`,
+              usage: { inputTokens: snapshot.composedTokens, source: "estimated" },
+            },
+          },
+        });
+      }
     },
     toolResultContextFormatter: new ToolResultContextFormatter({
       maximumBytes: dependencies.configuration?.configuration.context.maxToolResultBytes ?? 32_768,
     }),
     onModelEvent: (event, context) => {
       const now = dependencies.monotonicNow?.() ?? 0;
+      if (event.type === "usage.updated" && event.usage.source === "provider") {
+        providerUsageSeen = true;
+      }
       if (event.type === "response.started") modelStartedAt.set(context.runId, now);
       if (event.type === "text.delta") {
         const startedAt = modelStartedAt.get(context.runId);
@@ -1305,7 +1363,18 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   });
 
   let activeModelKey = command.modelKey;
-  emit({ type: "chat.started", sessionId: id, payload: { modelKey: activeModelKey } });
+  /** The model's declared context window, so the footer can show usage as a fraction of it. */
+  const contextWindowFor = (key: string): number | undefined =>
+    dependencies.registry.list().find((descriptor) => descriptor.key === key)?.capabilities
+      .maxContextTokens;
+  const modelPayload = (key: string) => {
+    const contextWindowTokens = contextWindowFor(key);
+    return {
+      modelKey: key,
+      ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+    };
+  };
+  emit({ type: "chat.started", sessionId: id, payload: modelPayload(activeModelKey) });
 
   let pendingLine: Promise<string | undefined> | undefined;
   let inputClosed = false;
@@ -1356,7 +1425,11 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
         continue;
       }
       activeModelKey = requestedModelKey;
-      emit({ type: "chat.model.changed", sessionId: id, payload: { modelKey: activeModelKey } });
+      emit({
+        type: "chat.model.changed",
+        sessionId: id,
+        payload: modelPayload(activeModelKey),
+      });
       continue;
     }
     if (text === "/abort") {

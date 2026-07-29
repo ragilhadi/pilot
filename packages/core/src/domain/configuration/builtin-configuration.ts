@@ -14,6 +14,7 @@ export const builtinConfiguration: PilotConfiguration = PilotConfigurationSchema
     maxInstructionTotalBytes: 524_288,
     maxToolResultBytes: 32_768,
   },
+  prompt: { systemPrompt: "builtin" },
   permissions: { rules: [] },
   runBudget: {
     // Loop bounds are generous backstops against runaway iteration, not the

@@ -15,7 +15,9 @@ const cleanupDirectories: string[] = [];
 
 afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {
-    await rm(directory, { recursive: true, force: true });
+    // Windows releases SQLite's file handles asynchronously after close(), so an immediate unlink
+    // can lose a race and throw EBUSY. Retrying turns a flaky teardown into a brief wait.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 
@@ -195,7 +197,12 @@ describe("SqliteSessionAdministration", () => {
 });
 
 describe("SQLite backup and diagnostics", () => {
-  it("creates a consistent online backup that opens and passes diagnostics", async () => {
+  // The only test here that touches real files twice over: two migrations, two integrity checks,
+  // and a page-copying online backup. On a cold Windows runner that regularly exceeds vitest's
+  // 5s default, so give it room rather than letting a slow disk read as a product failure.
+  it("creates a consistent online backup that opens and passes diagnostics", {
+    timeout: 30_000,
+  }, async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "pilot-backup-"));
     cleanupDirectories.push(directory);
     const sourcePath = path.join(directory, "source.db");

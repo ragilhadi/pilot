@@ -12,11 +12,17 @@ import type * as z from "zod";
 export class ToolNotFoundError extends PilotError {
   readonly toolName: string;
 
-  constructor(toolName: string) {
+  constructor(toolName: string, availableTools: readonly string[] = []) {
     super({
       code: "PILOT_TOOL_NOT_FOUND",
       message: `Tool ${toolName} is not registered`,
-      metadata: { toolName },
+      // Naming the alternatives is what lets a model that hallucinated a tool name recover on the
+      // next cycle instead of repeating the same call.
+      safeMessage:
+        availableTools.length === 0
+          ? `Tool ${toolName} is not available`
+          : `Tool ${toolName} is not available. Available tools: ${availableTools.join(", ")}`,
+      metadata: { toolName, ...(availableTools.length === 0 ? {} : { availableTools }) },
     });
     this.toolName = toolName;
   }
@@ -69,7 +75,7 @@ export class ToolRegistry {
   resolve(toolName: string): RegisteredTool {
     const registered = this.#tools.get(toolName);
     if (registered === undefined) {
-      throw new ToolNotFoundError(toolName);
+      throw new ToolNotFoundError(toolName, [...this.#tools.keys()].sort());
     }
     return registered;
   }

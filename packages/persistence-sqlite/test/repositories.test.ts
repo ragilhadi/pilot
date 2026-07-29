@@ -14,7 +14,9 @@ const cleanupDirectories: string[] = [];
 
 afterEach(async () => {
   for (const directory of cleanupDirectories.splice(0)) {
-    await rm(directory, { recursive: true, force: true });
+    // Windows releases SQLite's file handles asynchronously after close(), so an immediate unlink
+    // can lose a race and throw EBUSY. Retrying turns a flaky teardown into a brief wait.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
 

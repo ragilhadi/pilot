@@ -5,6 +5,7 @@ import {
   type ModelCapabilities,
   ModelContractValidationError,
   parseAgentMessage,
+  resolveConfiguration,
   runId,
   sessionId,
 } from "@pilotrun/core";
@@ -742,7 +743,6 @@ describe("pilot chat", () => {
       expect(stderr.text()).toBe("");
       expect(model.calls[0]?.request.tools.map(({ name }) => name)).toEqual([
         "apply_patch",
-        "create_file",
         "edit",
         "git_diff",
         "git_status",
@@ -754,6 +754,7 @@ describe("pilot chat", () => {
         "todo_read",
         "todo_write",
         "web_fetch",
+        "write_file",
       ]);
       expect(model.calls[1]?.request.messages.at(-1)).toMatchObject({
         role: "tool",
@@ -762,7 +763,7 @@ describe("pilot chat", () => {
             type: "tool-result",
             callId: "call-read",
             isError: false,
-            output: { path: "evidence.txt", content: "CLI repository evidence\n" },
+            output: { path: "evidence.txt", content: "     1\tCLI repository evidence\n" },
           },
         ],
       });
@@ -910,12 +911,39 @@ describe("pilot chat", () => {
     const contextStart = stdout.text().indexOf("[context cycle 1:");
     expect(contextStart).toBeGreaterThan(0);
     const contextOutput = stdout.text().slice(contextStart);
-    expect(contextOutput).toContain("1 selected, 0 excluded");
+    // The baseline system prompt is always selected alongside the conversation.
+    expect(contextOutput).toContain("2 selected, 0 excluded");
     expect(contextOutput).toContain("[fingerprint sha256:");
+    expect(contextOutput).toContain("+ system-prompt:baseline");
     expect(contextOutput).toContain("+ conversation:000001");
     expect(contextOutput).toContain("trust=untrusted");
     expect(contextOutput).not.toContain("private context marker");
     expect(stderr.text()).toBe("");
+  });
+
+  it('omits the baseline system prompt when systemPrompt is "none"', async () => {
+    const model = new FakeLanguageModel({
+      providerId: "fake",
+      modelId: "unprompted-chat",
+      scripts: [textResponseScript({ responseId: "response-unprompted", deltas: ["Answer"] })],
+    });
+    const { dependencies } = cliDependencies(
+      new ModelRegistry([{ model, displayName: "Unprompted Chat Fake" }]),
+      new AbortController().signal,
+      timedLines([{ line: "hello" }, { line: "/exit", delayMs: 100 }]),
+    );
+
+    expect(
+      await runCli(["chat", "--model", "fake/unprompted-chat"], {
+        ...dependencies,
+        configuration: resolveConfiguration([
+          { source: "project", location: "test", value: { prompt: { systemPrompt: "none" } } },
+        ]),
+      }),
+    ).toBe(0);
+
+    expect(model.calls[0]?.request.messages.map(({ role }) => role)).toEqual(["user"]);
+    expect(JSON.stringify(model.calls[0]?.request.messages)).not.toContain("You are Pilot");
   });
 
   it("includes applicable project instructions in the inspected model prompt", async () => {
@@ -953,8 +981,13 @@ describe("pilot chat", () => {
       }),
     ).toBe(0);
 
-    expect(model.calls[0]?.request.messages.map(({ role }) => role)).toEqual(["system", "user"]);
-    const instructionPart = model.calls[0]?.request.messages[0]?.parts[0];
+    // The baseline system prompt outranks project instructions, so it comes first.
+    expect(model.calls[0]?.request.messages.map(({ role }) => role)).toEqual([
+      "system",
+      "system",
+      "user",
+    ]);
+    const instructionPart = model.calls[0]?.request.messages[1]?.parts[0];
     expect(instructionPart?.type === "text" ? instructionPart.text : "").toContain(
       "Use the repository test command.",
     );
@@ -988,15 +1021,22 @@ describe("pilot chat", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { schemaVersion: number; sequence: number; type: string });
+    // The fake model reports no usage, so Pilot publishes its own estimate as the first
+    // model.stream event rather than leaving the context figure blank.
     expect(events.map(({ type }) => type)).toEqual([
       "chat.started",
+      "model.stream",
       "model.stream",
       "model.stream",
       "model.stream",
       "chat.turn.completed",
       "chat.ended",
     ]);
-    expect(events.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(events.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(events[1]).toMatchObject({
+      type: "model.stream",
+      payload: { event: { type: "usage.updated", usage: { source: "estimated" } } },
+    });
     expect(events.every(({ schemaVersion }) => schemaVersion === 1)).toBe(true);
     expect(stderr.text()).toBe("");
   });
@@ -1027,8 +1067,12 @@ describe("pilot chat", () => {
     expect(stdout.text()).toContain("[follow-up queued]");
     expect(stdout.text()).toContain("Revised answer");
     expect(model.calls).toHaveLength(2);
-    expect(model.calls[1]?.request.messages.map(({ role }) => role)).toEqual(["user", "user"]);
-    expect(model.calls[1]?.request.messages[1]?.parts).toEqual([
+    expect(model.calls[1]?.request.messages.map(({ role }) => role)).toEqual([
+      "system",
+      "user",
+      "user",
+    ]);
+    expect(model.calls[1]?.request.messages[2]?.parts).toEqual([
       { type: "text", text: "Changed direction" },
     ]);
   });

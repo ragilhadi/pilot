@@ -10,7 +10,10 @@ export function defineTool<
   input: ToolDefinitionInput<InputSchema, OutputSchema>,
 ): ToolDefinition<InputSchema, OutputSchema> {
   const name = toolNameSchema.parse(input.name);
-  const description = z.string().min(1).max(2_000).parse(input.description);
+  // A tool description is the model's only instruction manual: when to reach for the tool, which
+  // sibling to prefer, and what a well-formed call looks like. 2 000 characters is not enough room
+  // for that on the tools that need it most (run_command, edit, apply_patch).
+  const description = z.string().min(1).max(8_192).parse(input.description);
   const metadata = ToolMetadataSchema.parse(input.metadata);
   return Object.freeze({
     name,

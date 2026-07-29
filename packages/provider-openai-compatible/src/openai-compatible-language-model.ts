@@ -1,6 +1,5 @@
 import {
   CancellationError,
-  JsonValueSchema,
   type LanguageModel,
   type ModelCallContext,
   type ModelCapabilities,
@@ -14,6 +13,7 @@ import {
   parseModelRequest,
   parseModelStreamEvent,
   parseProviderConfiguration,
+  parseToolCallArguments,
   type ProviderConfiguration,
 } from "@pilotrun/core";
 import * as z from "zod";
@@ -52,7 +52,9 @@ const ToolCallDeltaSchema = z
 
 const StreamChunkSchema = z
   .object({
-    id: z.string().min(1),
+    // Optional: several OpenAI-compatible servers send a final usage-only chunk with no id, and
+    // rejecting it used to kill the whole stream rather than just lose the token counts.
+    id: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     system_fingerprint: z.string().nullable().optional(),
     choices: z
@@ -77,6 +79,10 @@ const StreamChunkSchema = z
       .object({
         prompt_tokens: z.number().int().nonnegative().optional(),
         completion_tokens: z.number().int().nonnegative().optional(),
+        total_tokens: z.number().int().nonnegative().optional(),
+        // Ollama's native counters, which its /v1 shim passes through unchanged.
+        prompt_eval_count: z.number().int().nonnegative().optional(),
+        eval_count: z.number().int().nonnegative().optional(),
         prompt_tokens_details: z
           .object({ cached_tokens: z.number().int().nonnegative().optional() })
           .passthrough()
@@ -271,6 +277,8 @@ class ChatCompletionStreamNormalizer {
   #responseId: string | undefined;
   #finishReason: string | undefined;
   #finished = false;
+  /** Correlation key used when a provider omits chunk ids entirely. */
+  readonly #fallbackResponseId = globalThis.crypto.randomUUID();
 
   consume(chunk: z.output<typeof StreamChunkSchema>): readonly ModelStreamEvent[] {
     if (this.#finished) {
@@ -278,9 +286,10 @@ class ChatCompletionStreamNormalizer {
     }
     const events: ModelStreamEvent[] = [];
     if (this.#responseId === undefined) {
-      this.#responseId = chunk.id;
+      // A stream whose very first chunk carries no id still needs a stable correlation key.
+      this.#responseId = chunk.id ?? `response-${this.#fallbackResponseId}`;
       events.push(this.#event({ type: "response.started" }));
-    } else if (chunk.id !== this.#responseId) {
+    } else if (chunk.id !== undefined && chunk.id !== this.#responseId) {
       throw contractError("OpenAI-compatible stream changed response identifiers");
     }
 
@@ -333,13 +342,25 @@ class ChatCompletionStreamNormalizer {
     }
 
     if (chunk.usage !== undefined && chunk.usage !== null) {
+      // Accept the OpenAI names, Ollama's native counters, and a total-only report. Previously a
+      // server that sent only `total_tokens` produced no usage event at all, leaving the counters
+      // silently blank.
+      const inputTokens = chunk.usage.prompt_tokens ?? chunk.usage.prompt_eval_count;
+      const outputTokens = chunk.usage.completion_tokens ?? chunk.usage.eval_count;
+      const total = chunk.usage.total_tokens;
+      const derivedInput =
+        inputTokens ??
+        (total !== undefined && outputTokens !== undefined
+          ? Math.max(0, total - outputTokens)
+          : undefined);
+      const derivedOutput =
+        outputTokens ??
+        (total !== undefined && inputTokens !== undefined
+          ? Math.max(0, total - inputTokens)
+          : undefined);
       const usage = {
-        ...(chunk.usage.prompt_tokens === undefined
-          ? {}
-          : { inputTokens: chunk.usage.prompt_tokens }),
-        ...(chunk.usage.completion_tokens === undefined
-          ? {}
-          : { outputTokens: chunk.usage.completion_tokens }),
+        ...(derivedInput === undefined ? {} : { inputTokens: derivedInput }),
+        ...(derivedOutput === undefined ? {} : { outputTokens: derivedOutput }),
         ...(chunk.usage.prompt_tokens_details?.cached_tokens === undefined
           ? {}
           : { cachedInputTokens: chunk.usage.prompt_tokens_details.cached_tokens }),
@@ -438,24 +459,12 @@ class ChatCompletionStreamNormalizer {
       if (!state.started || state.id === undefined) {
         throw contractError("OpenAI-compatible tool call ended without an identifier and name");
       }
-      let input: unknown;
-      try {
-        input = JSON.parse(state.arguments);
-      } catch (error) {
-        throw contractError("OpenAI-compatible tool arguments were not valid JSON", error);
-      }
-      const parsed = JsonValueSchema.safeParse(input);
-      if (!parsed.success) {
-        throw new ModelContractValidationError(
-          "OpenAI-compatible tool arguments",
-          parsed.error.issues.length,
-          parsed.error,
-        );
-      }
+      // Malformed arguments are a model mistake, not a protocol violation. Emitting the call with
+      // empty input lets the tool's own schema produce a recoverable, field-level error instead of
+      // aborting the run non-retryably.
+      const { input } = parseToolCallArguments(state.arguments);
       state.completed = true;
-      events.push(
-        this.#event({ type: "tool-call.completed", callId: state.id, input: parsed.data }),
-      );
+      events.push(this.#event({ type: "tool-call.completed", callId: state.id, input }));
     }
   }
 

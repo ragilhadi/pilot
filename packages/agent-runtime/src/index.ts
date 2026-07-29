@@ -124,6 +124,11 @@ export {
   type InstructionTrust,
 } from "./instruction-discovery.js";
 export {
+  composeSystemPrompt,
+  createSystemPromptContextSource,
+  type SystemPromptInput,
+} from "./system-prompt.js";
+export {
   ContextEngine,
   ContextEngineError,
   resolveContextBudget,
@@ -157,6 +162,9 @@ export {
   type ToolResultContextFormatterPort,
   type ToolResultContextInput,
   type ToolResultContextPolicy,
+  type ToolResultFieldContentTruncation,
+  type ToolResultHeadTailTruncation,
+  type ToolResultPreservedErrorTruncation,
   type ToolResultTruncationMetadata,
 } from "./tool-result-context.js";
 export {

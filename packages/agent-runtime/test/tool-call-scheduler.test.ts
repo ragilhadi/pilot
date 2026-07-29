@@ -186,6 +186,48 @@ describe("ToolCallScheduler", () => {
     expect(results[3]?.output).toMatchObject({ error: { code: "PILOT_TOOL_OUTPUT_INVALID" } });
   });
 
+  it("tells the model which fields were wrong and which tools exist", async () => {
+    const registry = new ToolRegistry([
+      tool("read_thing", "parallel-safe", async ({ value }) => ({
+        output: { value },
+      })),
+    ]);
+    const scheduler = new ToolCallScheduler({ registry });
+
+    const results = await scheduler.execute({
+      runId: runId("run-detail"),
+      calls: [
+        { callId: toolCallId("bad-input"), toolName: "read_thing", input: { valu: 1 } },
+        call("no-such-tool", "read_thnig"),
+      ],
+      signal: new AbortController().signal,
+    });
+
+    // Without the field detail the model is told only "the input did not match its declared
+    // schema", which gives it nothing to revise.
+    expect(results[0]?.output).toMatchObject({
+      error: {
+        code: "PILOT_TOOL_INPUT_INVALID",
+        // The message names the offending field, so the model has something concrete to revise.
+        message: expect.stringContaining("value"),
+        metadata: {
+          toolName: "read_thing",
+          issues: expect.arrayContaining([expect.objectContaining({ path: "value" })]),
+        },
+      },
+      recovery: { retryable: true },
+    });
+
+    expect(results[1]?.output).toMatchObject({
+      error: {
+        code: "PILOT_TOOL_NOT_FOUND",
+        message: expect.stringContaining("read_thing"),
+        metadata: { availableTools: ["read_thing"] },
+      },
+      recovery: { retryable: true },
+    });
+  });
+
   it("enforces output bytes and tool deadlines as correlated errors", async () => {
     let timeoutSignalAborted = false;
     const oversized = tool(

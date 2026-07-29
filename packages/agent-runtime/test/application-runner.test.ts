@@ -647,17 +647,18 @@ describe("ApplicationRunner budgets and unsupported operations", () => {
 
     const toolMessage = result.generatedMessages[1];
     const toolPart = toolMessage?.parts[0];
+    // The result keeps its object shape; only the oversized `content` field is shortened.
     expect(toolPart).toMatchObject({
       type: "tool-result",
       output: {
-        head: expect.stringContaining("HEAD"),
-        tail: expect.stringContaining("TAIL"),
-        pilotTruncation: {
-          strategy: "head-tail",
-          retrieval: { action: "request-narrower-result", callId: "call-large" },
-        },
+        content: expect.stringContaining("bytes omitted"),
+        pilotTruncation: { strategy: "field-content", field: "content" },
       },
     });
+    const truncatedContent =
+      toolPart?.type === "tool-result" ? (toolPart.output as { content: string }).content : "";
+    expect(truncatedContent.startsWith("HEAD")).toBe(true);
+    expect(truncatedContent.endsWith("TAIL")).toBe(true);
     expect(toolMessage?.metadata).toMatchObject({
       contextTruncation: { maximumBytes: 700, untrusted: true },
     });

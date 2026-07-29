@@ -391,17 +391,17 @@ export class ModelStreamAccumulator {
     }
 
     if (toolCall.argumentsText.length > 0) {
-      let streamedInput: JsonValue;
+      // The streamed delta text is a progress artifact; the provider's completed input is
+      // authoritative and is already normalized by parseToolCallArguments. When a model streams
+      // unparseable arguments there is nothing to cross-check, and failing the run over it would
+      // discard a call the provider successfully recovered — so only compare parseable streams.
+      let streamedInput: JsonValue | undefined;
       try {
         streamedInput = JsonValueSchema.parse(JSON.parse(toolCall.argumentsText));
       } catch {
-        throw new ModelStreamProtocolError(
-          "malformed-tool-arguments",
-          `Tool call ${callId} streamed malformed JSON`,
-          { responseId: event.responseId, sequence: event.sequence },
-        );
+        streamedInput = undefined;
       }
-      if (!jsonEquals(streamedInput, input)) {
+      if (streamedInput !== undefined && !jsonEquals(streamedInput, input)) {
         throw this.#error(
           "tool-argument-mismatch",
           `Tool call ${callId} completed with input different from its argument stream`,

@@ -9,7 +9,7 @@ import {
 } from "@pilotrun/core";
 import * as z from "zod";
 import { compileGlobPattern } from "./glob-pattern.js";
-import { loadRepositoryIgnoreRules } from "./ignore-rules.js";
+import { loadRepositoryIgnoreRules, type RepositoryIgnoreRules } from "./ignore-rules.js";
 import { WorkspacePathError } from "./workspace-boundary.js";
 
 const maximumOutputBytes = 240_000;
@@ -35,16 +35,34 @@ export const FileListEntrySchema = z.discriminatedUnion("kind", [
 ]);
 
 const traversalFields = {
-  path: z.string().min(1).max(4_096).default("."),
+  path: z
+    .string()
+    .min(1)
+    .max(4_096)
+    .default(".")
+    .describe('Workspace-relative directory to start from. Defaults to "." (the workspace root).'),
   maxDepth: z.number().int().min(1).max(32),
-  limit: z.number().int().min(1).max(2_000),
-  includeHidden: z.boolean().default(false),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(2_000)
+    .describe("Maximum entries to return before the result is marked truncated."),
+  includeHidden: z
+    .boolean()
+    .default(false)
+    .describe("Include dot-files and dot-directories. Ignored paths are never returned."),
 } as const;
 
 export const ListFilesInputSchema = z
   .object({
     path: traversalFields.path,
-    maxDepth: traversalFields.maxDepth.default(1),
+    maxDepth: traversalFields.maxDepth
+      .default(1)
+      .describe(
+        "How many directory levels to descend. Defaults to 1, which lists only the immediate " +
+          "contents of path — raise it to see nested files, or use glob for a recursive search.",
+      ),
     limit: traversalFields.limit.default(200),
     includeHidden: traversalFields.includeHidden,
   })
@@ -53,12 +71,27 @@ export const ListFilesInputSchema = z
 
 export const GlobInputSchema = z
   .object({
-    pattern: z.string().min(1).max(256),
+    pattern: z
+      .string()
+      .min(1)
+      .max(256)
+      .describe(
+        'Relative glob pattern, for example "**/*.test.ts" or "src/**/index.ts". Use ** to match ' +
+          "across directories. Absolute paths and .. segments are rejected.",
+      ),
     path: traversalFields.path,
-    maxDepth: traversalFields.maxDepth.default(20),
+    maxDepth: traversalFields.maxDepth
+      .default(20)
+      .describe("How many directory levels to descend while matching."),
     limit: traversalFields.limit.default(200),
     includeHidden: traversalFields.includeHidden,
-    kind: z.enum(["any", "directory", "file"]).default("file"),
+    kind: z
+      .enum(["any", "directory", "file"])
+      .default("file")
+      .describe(
+        'What to return. Defaults to "file", so directories are not returned unless you pass ' +
+          '"directory" or "any".',
+      ),
   })
   .strict()
   .readonly();
@@ -115,7 +148,13 @@ export function createBuiltinFileListTools(boundary: WorkspaceBoundary): Builtin
   const listFiles = defineTool({
     name: "list_files",
     description:
-      "List files and directories below a workspace-relative directory with deterministic ordering and bounded output.",
+      "List the files and directories inside one workspace directory.\n\n" +
+      "Use this to orient yourself in an unfamiliar part of the repository. To find files by name " +
+      "pattern anywhere in the tree use glob; to find them by contents use grep.\n\n" +
+      "maxDepth defaults to 1, so by default this lists only the immediate contents of path and " +
+      "does not recurse. Ignored paths (.git, node_modules, dist, and anything in .gitignore) are " +
+      "never listed.\n\n" +
+      'Example: {"path": "src", "maxDepth": 2}',
     inputSchema: ListFilesInputSchema,
     outputSchema: ListFilesOutputSchema,
     metadata: readOnlyMetadata(10_000),
@@ -136,7 +175,12 @@ export function createBuiltinFileListTools(boundary: WorkspaceBoundary): Builtin
   const glob = defineTool({
     name: "glob",
     description:
-      "Find workspace files or directories matching a relative glob pattern with deterministic ordering and bounded output.",
+      "Find files by name pattern anywhere under a workspace directory.\n\n" +
+      "Use this when you know roughly what a file is called but not where it lives. Use grep " +
+      "instead to find files by what they contain.\n\n" +
+      'Returns files only by default; pass "kind": "directory" or "kind": "any" to include ' +
+      "directories. Ignored paths are never returned.\n\n" +
+      'Example: {"pattern": "**/*.test.ts"}',
     inputSchema: GlobInputSchema,
     outputSchema: GlobOutputSchema,
     metadata: readOnlyMetadata(15_000),
@@ -163,14 +207,16 @@ export function createBuiltinFileListTools(boundary: WorkspaceBoundary): Builtin
   return Object.freeze({ listFiles, glob });
 }
 
-interface WalkInput {
+export interface WalkInput {
   readonly path: string;
   readonly maxDepth: number;
   readonly limit: number;
   readonly includeHidden: boolean;
+  /** Pre-loaded rules, so a caller walking several directories reads the ignore files once. */
+  readonly ignoreRules?: RepositoryIgnoreRules;
 }
 
-interface WalkResult {
+export interface WalkResult {
   readonly root: string;
   readonly entries: readonly FileListEntry[];
   readonly scannedEntries: number;
@@ -178,6 +224,19 @@ interface WalkResult {
   readonly hiddenEntries: number;
   readonly unsafeLinksSkipped: number;
   readonly scanLimitReached: boolean;
+}
+
+/**
+ * Enumerates a workspace directory with ignore rules, hidden-file filtering, symlink containment,
+ * TOCTOU revalidation, a scan cap, and deterministic ordering already applied. Exported so other
+ * features (notably `@folder` context mentions) reuse this traversal instead of writing their own.
+ */
+export async function listWorkspaceDirectory(
+  boundary: WorkspaceBoundary,
+  input: WalkInput,
+  signal: AbortSignal,
+): Promise<WalkResult> {
+  return walkWorkspace(boundary, input, signal);
 }
 
 async function walkWorkspace(
@@ -194,10 +253,12 @@ async function walkWorkspace(
     });
   }
   const verifiedBase = await boundary.revalidate(base);
-  const ignoreRules = await loadRepositoryIgnoreRules(boundary, {
-    maxIgnoreFileBytes: maximumIgnoreFileBytes,
-    signal,
-  });
+  const ignoreRules =
+    input.ignoreRules ??
+    (await loadRepositoryIgnoreRules(boundary, {
+      maxIgnoreFileBytes: maximumIgnoreFileBytes,
+      signal,
+    }));
   const root = verifiedBase.relativePath.length === 0 ? "." : verifiedBase.relativePath;
   const entries: FileListEntry[] = [];
   const queue: { relativePath: string; depth: number }[] = [

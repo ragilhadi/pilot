@@ -17,6 +17,7 @@ const CACHE_TTL_MS = 2_000;
 interface WorkspaceFile {
   readonly path: string;
   readonly name: string;
+  readonly isDirectory: boolean;
 }
 
 export interface WorkspaceFileAutocompleteOptions {
@@ -105,7 +106,7 @@ export class WorkspaceFileAutocompleteProvider implements AutocompleteProvider {
         onLine: (rawLine) => {
           const path = rawLine.replaceAll("\\", "/").trim();
           if (path.length > 0) {
-            files.push({ path, name: basename(path) });
+            files.push({ path, name: basename(path), isDirectory: false });
           }
           return files.length < MAX_LISTED_FILES;
         },
@@ -114,10 +115,32 @@ export class WorkspaceFileAutocompleteProvider implements AutocompleteProvider {
       // ripgrep missing or failed — fall back to any cached listing.
       return this.#cache?.files ?? [];
     }
-    const frozen = Object.freeze(files);
+    const frozen = Object.freeze([...withDirectories(files)]);
     this.#cache = { files: frozen, loadedAt: now };
     return frozen;
   }
+}
+
+/**
+ * `rg --files` only ever emits files, so directory candidates are synthesised from the unique
+ * path prefixes of the listing. That keeps the picker's ignore semantics exactly as ripgrep
+ * computed them — a directory only appears if it contains at least one listable file.
+ */
+function withDirectories(files: readonly WorkspaceFile[]): readonly WorkspaceFile[] {
+  const directories = new Map<string, WorkspaceFile>();
+  for (const file of files) {
+    const segments = file.path.split("/");
+    for (let count = 1; count < segments.length; count += 1) {
+      const directoryPath = segments.slice(0, count).join("/");
+      if (directories.has(directoryPath)) continue;
+      directories.set(directoryPath, {
+        path: directoryPath,
+        name: segments[count - 1] ?? directoryPath,
+        isDirectory: true,
+      });
+    }
+  }
+  return [...files, ...directories.values()];
 }
 
 // A mention token begins with `@` at a token boundary. Quoted mentions
@@ -172,9 +195,9 @@ function rankFiles(
   }
   scored.sort((a, b) => b.score - a.score || a.file.path.localeCompare(b.file.path));
   return scored.slice(0, MAX_SUGGESTIONS).map(({ file }) => ({
-    value: buildAtValue(file.path, isQuotedPrefix),
-    label: file.name,
-    description: file.path,
+    value: buildAtValue(file.isDirectory ? `${file.path}/` : file.path, isQuotedPrefix),
+    label: file.isDirectory ? `${file.name}/` : file.name,
+    description: file.isDirectory ? `${file.path}/  (folder)` : file.path,
   }));
 }
 
@@ -201,7 +224,9 @@ function applyAtCompletion(
   const line = lines[cursorLine] ?? "";
   const beforePrefix = line.slice(0, cursorCol - prefix.length);
   const afterCursor = line.slice(cursorCol);
-  const suffix = " ";
+  // A folder completion ends in `/`; leaving the token open lets the user keep typing to descend
+  // into it, whereas a trailing space would close the mention.
+  const suffix = /\/"?$/u.test(item.value) ? "" : " ";
   const newLines = [...lines];
   newLines[cursorLine] = `${beforePrefix}${item.value}${suffix}${afterCursor}`;
   return {

@@ -21,3 +21,4 @@ export {
 } from "./message-part.js";
 export { MessageProvenanceSchema, type MessageProvenance } from "./message-provenance.js";
 export { AgentMessageSchema, parseAgentMessage, type AgentMessage } from "./agent-message.js";
+export { agentMessageWireText, messageTextContent } from "./message-wire-text.js";

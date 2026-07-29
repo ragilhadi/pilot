@@ -71,6 +71,75 @@ describe("ToolResultContextFormatter", () => {
     expect(left.truncation).toMatchObject({ contentType: "json" });
   });
 
+  it("keeps an over-budget error envelope readable instead of slicing its code in half", () => {
+    const errorOutput = {
+      error: {
+        code: "PILOT_TOOL_INPUT_INVALID",
+        message: `The tool input did not match the schema declared by read_file. ${"detail ".repeat(100)}`,
+        retryable: false,
+        metadata: { toolName: "read_file", violation: "input", issues: ["x".repeat(500)] },
+      },
+      recovery: {
+        kind: "invalid-input",
+        action: "revise-request",
+        sideEffects: "none",
+        retryable: true,
+        message: "Revise the tool input before trying again",
+      },
+    };
+    const result = format(errorOutput, 512);
+
+    expect(result.truncated).toBe(true);
+    expect(result.serializedBytes).toBeLessThanOrEqual(512);
+    // The recovery-critical fields survive verbatim; only the optional detail is shed.
+    expect(result.output).toMatchObject({
+      error: { code: "PILOT_TOOL_INPUT_INVALID", retryable: false },
+      recovery: errorOutput.recovery,
+      pilotTruncation: { strategy: "preserve-error", untrusted: true },
+    });
+    expect(JSON.stringify(result.output)).not.toContain('"head"');
+  });
+
+  it("shortens a structured result's bulkiest field and keeps its shape and paging hints", () => {
+    const result = format(
+      {
+        path: "src/main.ts",
+        content: `HEAD${"x".repeat(4_000)}TAIL`,
+        totalLines: 900,
+        truncated: true,
+        nextStartLine: 42,
+        sha256: "a".repeat(64),
+      },
+      1_024,
+    );
+
+    expect(result.truncated).toBe(true);
+    expect(result.serializedBytes).toBeLessThanOrEqual(1_024);
+    // The fields the model needs in order to ask for the rest all survive verbatim.
+    expect(result.output).toMatchObject({
+      path: "src/main.ts",
+      totalLines: 900,
+      nextStartLine: 42,
+      sha256: "a".repeat(64),
+      pilotTruncation: { strategy: "field-content", field: "content" },
+    });
+    const content = (result.output as { content: string }).content;
+    expect(content.startsWith("HEAD")).toBe(true);
+    expect(content.endsWith("TAIL")).toBe(true);
+    expect(content).toContain("bytes omitted");
+    // No head/tail re-serialization, so the payload is not escaped a second time.
+    expect(JSON.stringify(result.output)).not.toContain('"head"');
+  });
+
+  it("falls back to head/tail when the bulk is not in one string field", () => {
+    const result = format(
+      { values: Array.from({ length: 400 }, (_, index) => `entry-${index}`) },
+      512,
+    );
+
+    expect(result.truncation?.strategy).toBe("head-tail");
+  });
+
   it("rejects unsafe policy values and metadata that cannot fit", () => {
     expect(() => new ToolResultContextFormatter({ maximumBytes: 511 })).toThrowError(
       ToolResultContextError,

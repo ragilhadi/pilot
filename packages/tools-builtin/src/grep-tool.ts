@@ -24,18 +24,65 @@ export const GrepInputSchema = z
       .string()
       .min(1)
       .max(1_000)
+      .describe(
+        'The text to search for. Treated as literal text unless mode is set to "regex". ' +
+          "Cannot contain line breaks.",
+      )
       .refine(
         (value) => !/[\0\r\n]/u.test(value),
         "Search queries cannot contain line breaks or null bytes",
       ),
-    mode: z.enum(["literal", "regex"]).default("literal"),
-    path: z.string().min(1).max(4_096).default("."),
-    glob: z.string().min(1).max(256).optional(),
-    caseSensitive: z.boolean().default(true),
-    includeHidden: z.boolean().default(false),
-    maxResults: z.number().int().min(1).max(500).default(100),
-    maxFileSizeBytes: z.number().int().min(1).max(100_000_000).default(2_000_000),
-    maxExcerptChars: z.number().int().min(40).max(1_000).default(300),
+    mode: z
+      .enum(["literal", "regex"])
+      .default("literal")
+      .describe(
+        'Defaults to "literal", which searches for the query text exactly. You MUST set ' +
+          '"regex" to use regular-expression syntax — a pattern passed in literal mode simply ' +
+          "finds nothing rather than reporting an error.",
+      ),
+    path: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .default(".")
+      .describe(
+        'Workspace-relative directory or file to search. Defaults to "." (the whole workspace).',
+      ),
+    glob: z
+      .string()
+      .min(1)
+      .max(256)
+      .optional()
+      .describe(
+        'Restrict the search to files matching this glob, for example "**/*.ts". ' +
+          ".git, node_modules, dist, build, and coverage are always excluded.",
+      ),
+    caseSensitive: z.boolean().default(true).describe("Set false for a case-insensitive search."),
+    includeHidden: z
+      .boolean()
+      .default(false)
+      .describe("Include dot-files and dot-directories in the search."),
+    maxResults: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .default(100)
+      .describe("Maximum matches to return. Lower it when you only need to confirm existence."),
+    maxFileSizeBytes: z
+      .number()
+      .int()
+      .min(1)
+      .max(100_000_000)
+      .default(2_000_000)
+      .describe("Skip files larger than this."),
+    maxExcerptChars: z
+      .number()
+      .int()
+      .min(40)
+      .max(1_000)
+      .default(300)
+      .describe("Maximum characters of surrounding context returned per match."),
   })
   .strict()
   .readonly();
@@ -275,7 +322,13 @@ export function createGrepTool(
   return defineTool({
     name: "grep",
     description:
-      "Search text files inside the workspace using literal or safe ripgrep regular-expression mode with sanitized bounded excerpts.",
+      "Search the contents of files in the workspace.\n\n" +
+      "This is the fastest way to locate code by what it contains — a symbol name, a string, an " +
+      "error message. Use it before reading files: search first, then read only the files the " +
+      "matches point at. Use glob instead when you know the filename pattern but not the contents.\n\n" +
+      "Searches for literal text by default. To use a regular expression you must also pass " +
+      '"mode": "regex"; a regex sent without it silently matches nothing.\n\n' +
+      'Example: {"query": "createWebFetchTool", "glob": "**/*.ts"}',
     inputSchema: GrepInputSchema,
     outputSchema: GrepOutputSchema,
     metadata: {

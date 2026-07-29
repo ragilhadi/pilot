@@ -7,11 +7,38 @@ const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
 export const EditFileInputSchema = z
   .object({
-    path: z.string().min(1).max(4_096),
-    baseSha256: sha256Schema,
-    oldString: z.string().min(1).max(1_000_000),
-    newString: z.string().max(1_000_000),
-    replaceAll: z.boolean().default(false),
+    path: z
+      .string()
+      .min(1)
+      .max(4_096)
+      .describe('Workspace-relative path to the file to change, for example "src/index.ts".'),
+    baseSha256: sha256Schema.describe(
+      "The sha256 value from the read_file result for this exact file. Read the file first and " +
+        "copy its sha256 here; the edit is rejected if the file changed since that read.",
+    ),
+    oldString: z
+      .string()
+      .min(1)
+      .max(1_000_000)
+      .describe(
+        "The exact text to replace, copied verbatim from the file including indentation and " +
+          "newlines. It must appear exactly once unless replaceAll is true — include a few " +
+          "surrounding lines to make it unique.",
+      ),
+    newString: z
+      .string()
+      .max(1_000_000)
+      .describe(
+        "The replacement text. Pass an empty string to delete the matched text. Must differ from " +
+          "oldString.",
+      ),
+    replaceAll: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Replace every occurrence instead of requiring a unique match. Use for renaming a symbol " +
+          "throughout a file.",
+      ),
   })
   .strict()
   .refine(
@@ -60,8 +87,15 @@ export function createEditFileTool(
   return defineTool({
     name: "edit",
     description:
-      "Replace an exact string in one existing UTF-8 workspace file, guarded by the file's current " +
-      "SHA-256, using atomic replacement. The oldString must be unique unless replaceAll is set.",
+      "Change part of an existing text file by replacing an exact string.\n\n" +
+      "This is the preferred way to modify a file. Prefer it over apply_patch for a single " +
+      "localized change, and over write_file for anything other than creating a new file.\n\n" +
+      "Workflow: call read_file first, copy its sha256 into baseSha256, then pass the exact text " +
+      "to replace as oldString. Copy oldString verbatim from what read_file returned, including " +
+      "indentation. If the tool reports the text is not unique, include more surrounding lines " +
+      "rather than retrying the same call.\n\n" +
+      'Example: {"path": "src/config.ts", "baseSha256": "<sha256 from read_file>", ' +
+      '"oldString": "  port: 3000,", "newString": "  port: 8080,"}',
     inputSchema: EditFileInputSchema,
     outputSchema: EditFileOutputSchema,
     metadata: {
