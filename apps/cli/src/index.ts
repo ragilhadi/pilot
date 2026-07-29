@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { InstructionDiscovery, runtimeVersion } from "@pilotrun/agent-runtime";
+import { builtinLanguageServers } from "@pilotrun/lsp";
 import {
   createSqliteRepositories,
   SqliteCrashRecovery,
@@ -28,7 +29,7 @@ import {
 import { remediationForError, runCli } from "./cli.js";
 import { defaultConfigurationPaths, loadCliConfiguration } from "./configuration.js";
 import { NodeInstructionFileReader } from "./node-instruction-reader.js";
-import { PilotDoctor } from "./diagnostics.js";
+import { PilotDoctor, type LanguageServerDiagnostic } from "./diagnostics.js";
 import { createModelCatalog, inspectProviderCredentials } from "./model-catalog.js";
 import { modelsStorePath, readPersistedModels } from "./model-store.js";
 import type { InteractiveChatPresentation } from "./presentation/chat-presentation.js";
@@ -101,6 +102,7 @@ export {
   type DiagnosticStatus,
   type DoctorDependencies,
   type DoctorReport,
+  type LanguageServerDiagnostic,
   PilotDoctor,
   type ProviderCredentialDiagnostic,
   renderDoctorReport,
@@ -241,6 +243,7 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
           ...(persistence?.database === undefined ? {} : { database: persistence.database }),
           providerCredentials: inspectProviderCredentials(process.env),
           probeCommand,
+          languageServers: await probeLanguageServers(),
         });
         if (useTui) {
           const [{ ProcessTerminal }, { TerminalChatPresentation }] = await Promise.all([
@@ -378,6 +381,31 @@ function configuredSecretValues(environment: NodeJS.ProcessEnv): readonly string
         value !== undefined && /(?:api[_-]?key|credential|password|secret|token)/iu.test(name),
     )
     .flatMap(([, value]) => (value === undefined ? [] : [value]));
+}
+
+/** Reports whether each built-in language server's binary can be executed. */
+async function probeLanguageServers(): Promise<readonly LanguageServerDiagnostic[]> {
+  return Promise.all(
+    builtinLanguageServers.map(async (server) => ({
+      id: server.id,
+      command: server.command,
+      installHint: server.installHint,
+      available: await commandExists(server.command),
+    })),
+  );
+}
+
+async function commandExists(command: string): Promise<boolean> {
+  try {
+    await execFileAsync(command, ["--version"], {
+      timeout: 5_000,
+      windowsHide: true,
+      shell: process.platform === "win32",
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function probeCommand(kind: "git" | "shell"): Promise<boolean> {

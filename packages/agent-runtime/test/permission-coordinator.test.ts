@@ -183,3 +183,88 @@ describe("PermissionCoordinator", () => {
 function signal(): AbortSignal {
   return new AbortController().signal;
 }
+
+describe("PermissionCoordinator approval breadth", () => {
+  function coordinatorAllowing(scope: string) {
+    const policy = new PermissionPolicyEngine({ clock });
+    const coordinator = new PermissionCoordinator({
+      policy,
+      mode: "interactive",
+      interaction: { requestPermission: async () => ({ effect: "allow", scope }) },
+    });
+    return { policy, coordinator };
+  }
+
+  // A scope says how long an approval lasts, never what it covers. Pairing one with an `any`
+  // matcher turned "allow for session" into a blanket approval of every later tool call, so
+  // approving one npm build silently pre-authorized an unrelated network command.
+  it.each(["session", "workspace", "application", "exact-action", "once"])(
+    "keeps a %s approval bound to the reviewed action",
+    async (scope) => {
+      const { policy, coordinator } = coordinatorAllowing(scope);
+      const approved = await coordinator.authorize({
+        action: action(),
+        context: context(),
+        signal: new AbortController().signal,
+      });
+      expect(approved.effect).toBe("allow");
+
+      const unrelated = policy.evaluate({
+        action: PermissionActionSchema.parse({
+          kind: "command",
+          executable: "curl",
+          args: ["https://example.test", "-o", "out"],
+          cwd: ".",
+          environment: {},
+          risk: "network",
+          requiredPermissions: ["process.execute", "network.access"],
+        }),
+        context: context("call-2"),
+      });
+      expect(unrelated.effect).toBe("ask");
+    },
+  );
+
+  it("re-allows the identical action for the rest of the session", async () => {
+    const { policy, coordinator } = coordinatorAllowing("session");
+    await coordinator.authorize({
+      action: action(),
+      context: context(),
+      signal: new AbortController().signal,
+    });
+    expect(policy.evaluate({ action: action(), context: context("call-2") }).effect).toBe("allow");
+  });
+
+  it("does not carry a session approval into a different session", async () => {
+    const { policy, coordinator } = coordinatorAllowing("session");
+    await coordinator.authorize({
+      action: action(),
+      context: context(),
+      signal: new AbortController().signal,
+    });
+    const elsewhere = policy.evaluate({
+      action: action(),
+      context: { ...context("call-2"), sessionId: "session-2" },
+    });
+    expect(elsewhere.effect).toBe("ask");
+  });
+
+  it("still lets a tool-scoped approval cover the whole tool", async () => {
+    const { policy, coordinator } = coordinatorAllowing("tool");
+    await coordinator.authorize({
+      action: action(),
+      context: context(),
+      signal: new AbortController().signal,
+    });
+    const otherInput = PermissionActionSchema.parse({
+      kind: "tool",
+      toolName: "write_file",
+      risk: "workspace-write",
+      requiredPermissions: ["workspace.write"],
+      input: { path: "a-completely-different-file.txt" },
+    });
+    expect(policy.evaluate({ action: otherInput, context: context("call-2") }).effect).toBe(
+      "allow",
+    );
+  });
+});

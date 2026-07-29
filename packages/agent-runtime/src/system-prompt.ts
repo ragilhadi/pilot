@@ -90,6 +90,20 @@ export function composeSystemPrompt(input: SystemPromptInput): string {
         "because the hash no longer matches, read the file again and rebuild the change against " +
         "what it says now — do not retry with the old hash.",
     );
+    if (has("diagnostics")) {
+      changingFiles.push(
+        "",
+        "Every successful write returns a `diagnostics` field holding the language server's view " +
+          "of the file you just wrote. Read it before moving on:",
+        '- `status` `"ready"` with an empty `items` means the file is clean.',
+        '- `status` `"ready"` with items means your change has errors. Fix them now, in this ' +
+          "turn — they are yours, and they are cheaper to fix here than after you have moved on.",
+        '- `status` `"unavailable"`, `"timeout"`, or `"unsupported"` means nothing was checked. ' +
+          "Do not read that as a clean result; verify another way if the change was risky.",
+        "Use the `diagnostics` tool only for a file you have not just written — you already have " +
+          "the report for the ones you have.",
+      );
+    }
     sections.push(["# Changing files", ...changingFiles].join("\n"));
   }
 

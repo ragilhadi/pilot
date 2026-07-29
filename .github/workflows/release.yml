@@ -44,7 +44,7 @@ jobs:
             exit 1
           fi
 
-      - name: Check formatting, lint, types, and version sync
+      - name: Check formatting, lint, types, and package versions
         run: pnpm check
 
       - name: Run tests

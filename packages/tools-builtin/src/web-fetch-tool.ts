@@ -441,22 +441,84 @@ function isBlockedIpv4(address: string): boolean {
   return false;
 }
 
+/**
+ * Classifies an IPv6 address from its parsed groups rather than its text form.
+ *
+ * Matching on the printed string is not safe here: `new URL("http://[::ffff:127.0.0.1]")` normalizes
+ * its hostname to the hex form `[::ffff:7f00:1]`, so a dotted-quad pattern never fires and every
+ * IPv4-mapped address — loopback, private ranges, and cloud metadata at 169.254.169.254 — sailed
+ * through the filter. Any address that embeds an IPv4 address is resolved back to those four octets
+ * and re-checked with the IPv4 rules.
+ */
 function isBlockedIpv6(address: string): boolean {
-  const value = address.toLowerCase().split("%")[0] ?? "";
-  if (value === "::1" || value === "::") return true; // loopback, unspecified
-  if (
-    value.startsWith("fe8") ||
-    value.startsWith("fe9") ||
-    value.startsWith("fea") ||
-    value.startsWith("feb")
-  ) {
-    return true; // link-local fe80::/10
-  }
-  if (value.startsWith("fc") || value.startsWith("fd")) return true; // unique local fc00::/7
-  if (value.startsWith("ff")) return true; // multicast
-  const mapped = value.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/u);
-  if (mapped?.[1] !== undefined) return isBlockedIpv4(mapped[1]);
+  const groups = parseIpv6Groups(address);
+  if (groups === undefined) return true; // Unparseable: refuse rather than guess.
+  if (groups.every((group) => group === 0)) return true; // ::  unspecified
+  if (groups.slice(0, 7).every((group) => group === 0) && groups[7] === 1) return true; // ::1
+  const embedded = embeddedIpv4(groups);
+  if (embedded !== undefined) return isBlockedIpv4(embedded);
+  const first = groups[0] ?? 0;
+  if ((first & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  if ((first & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
+  if ((first & 0xff00) === 0xff00) return true; // ff00::/8 multicast
+  if (first === 0x2002) return true; // 2002::/16 6to4 tunnels an arbitrary IPv4 destination
   return false;
+}
+
+/** Expands an IPv6 literal (including `::` and a trailing dotted quad) into its eight 16-bit groups. */
+function parseIpv6Groups(address: string): readonly number[] | undefined {
+  const value = (address.toLowerCase().split("%")[0] ?? "").trim();
+  if (value.length === 0) return undefined;
+  const halves = value.split("::");
+  if (halves.length > 2) return undefined;
+
+  const expand = (part: string): number[] | undefined => {
+    if (part.length === 0) return [];
+    const groups: number[] = [];
+    const pieces = part.split(":");
+    for (const [index, piece] of pieces.entries()) {
+      if (piece.includes(".")) {
+        // A trailing dotted quad occupies the final two groups.
+        if (index !== pieces.length - 1) return undefined;
+        const octets = piece.split(".").map((octet) => Number(octet));
+        if (
+          octets.length !== 4 ||
+          octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+        ) {
+          return undefined;
+        }
+        const [a = 0, b = 0, c = 0, d = 0] = octets;
+        groups.push((a << 8) | b, (c << 8) | d);
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/u.test(piece)) return undefined;
+      groups.push(Number.parseInt(piece, 16));
+    }
+    return groups;
+  };
+
+  const head = expand(halves[0] ?? "");
+  const tail = halves.length === 2 ? expand(halves[1] ?? "") : [];
+  if (head === undefined || tail === undefined) return undefined;
+  if (halves.length === 1) return head.length === 8 ? head : undefined;
+  const missing = 8 - head.length - tail.length;
+  if (missing < 1) return undefined;
+  return [...head, ...Array.from({ length: missing }, () => 0), ...tail];
+}
+
+/**
+ * Returns the dotted-quad an IPv6 address embeds, if any: `::ffff:a.b.c.d` (IPv4-mapped),
+ * `::a.b.c.d` (deprecated IPv4-compatible), and `64:ff9b::a.b.c.d` (NAT64) all reach an IPv4 host.
+ */
+function embeddedIpv4(groups: readonly number[]): string | undefined {
+  const leading = groups.slice(0, 5).every((group) => group === 0);
+  const isMapped = leading && groups[5] === 0xffff;
+  const isCompatible = leading && groups[5] === 0;
+  const isNat64 = groups[0] === 0x0064 && groups[1] === 0xff9b;
+  if (!isMapped && !isCompatible && !isNat64) return undefined;
+  const high = groups[6] ?? 0;
+  const low = groups[7] ?? 0;
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
 }
 
 async function readBounded(

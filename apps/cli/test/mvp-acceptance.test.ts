@@ -325,6 +325,7 @@ describe("MVP acceptance scenario", () => {
         });
         let approvalsSent = 0;
         let exitSent = false;
+        let exitConfirmed = false;
         terminal.onWrite = () => {
           const approvalCount = terminal.output.split("Permission required").length - 1;
           if (approvalCount > approvalsSent) {
@@ -334,6 +335,12 @@ describe("MVP acceptance scenario", () => {
           if (approvalsSent === 3 && terminal.output.includes("Tests performed:") && !exitSent) {
             exitSent = true;
             queueMicrotask(() => typeTerminal(terminal, "/exit\r"));
+            return;
+          }
+          // Exiting is confirmed now, so answer the prompt the session raises.
+          if (exitSent && !exitConfirmed && terminal.output.includes("Are you sure you want to")) {
+            exitConfirmed = true;
+            queueMicrotask(() => terminal.input("y"));
           }
         };
         database = openPersistence(databasePath).database;

@@ -53,15 +53,26 @@ export class ChangeJournalError extends PilotError {
   }
 }
 
+/** Default ceiling on retained rollback content, in bytes. */
+export const defaultChangeJournalContentBytes = 8_000_000;
+
+export interface InMemoryChangeJournalOptions {
+  /** Ceiling on retained pre-edit content. Oldest originals are evicted first. */
+  readonly maximumContentBytes?: number;
+}
+
 /** Process-local journal with hash-guarded rollback data kept out of public records. */
 export class InMemoryChangeJournal implements ChangeJournal {
   readonly #clock: Clock;
   readonly #entries: ChangeJournalEntry[] = [];
   readonly #originalContent = new Map<number, string>();
   readonly #rolledBack = new Set<number>();
+  readonly #maximumContentBytes: number;
+  #retainedBytes = 0;
 
-  constructor(clock: Clock) {
+  constructor(clock: Clock, options: InMemoryChangeJournalOptions = {}) {
     this.#clock = clock;
+    this.#maximumContentBytes = options.maximumContentBytes ?? defaultChangeJournalContentBytes;
   }
 
   recordApplied(input: AppliedChangeInput): ChangeJournalEntry {
@@ -77,8 +88,30 @@ export class InMemoryChangeJournal implements ChangeJournal {
       additions: input.additions,
       deletions: input.deletions,
     });
-    this.#originalContent.set(entry.sequence, input.originalContent);
+    this.#retain(entry.sequence, input.originalContent);
     return entry;
+  }
+
+  /**
+   * Stores the pre-edit content that `rollback` would restore, evicting the oldest originals once
+   * the budget is exceeded.
+   *
+   * Retention used to be unbounded: every edit, patch, and overwrite kept a full copy of the file
+   * as it was before the change, for the lifetime of the process. A long session that repeatedly
+   * rewrote large files grew without limit. Evicted entries stay in the journal — only their
+   * rollback payload is dropped, and `rollback` already reports that as unavailable.
+   */
+  #retain(sequence: number, content: string): void {
+    const bytes = Buffer.byteLength(content, "utf8");
+    if (bytes > this.#maximumContentBytes) return; // Single file larger than the whole budget.
+    this.#originalContent.set(sequence, content);
+    this.#retainedBytes += bytes;
+    for (const [candidate, retained] of this.#originalContent) {
+      if (this.#retainedBytes <= this.#maximumContentBytes) break;
+      if (candidate === sequence) continue;
+      this.#originalContent.delete(candidate);
+      this.#retainedBytes -= Buffer.byteLength(retained, "utf8");
+    }
   }
 
   entries(runId?: RunId): readonly ChangeJournalEntry[] {
@@ -109,6 +142,9 @@ export class InMemoryChangeJournal implements ChangeJournal {
       signal: input.signal,
     });
     this.#rolledBack.add(input.sequence);
+    // The change is undone, so its pre-edit copy can never be needed again.
+    this.#originalContent.delete(input.sequence);
+    this.#retainedBytes -= Buffer.byteLength(content, "utf8");
     return this.#append({
       runId: input.runId,
       callId: input.callId,

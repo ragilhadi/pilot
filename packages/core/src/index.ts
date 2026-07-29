@@ -50,6 +50,20 @@ export {
 } from "./errors/model-error.js";
 export { SessionError, type SessionErrorReason } from "./errors/session-error.js";
 export type { Clock, IdSource } from "./entity/ports.js";
+export {
+  DiagnosticSeveritySchema,
+  DiagnosticsStatusSchema,
+  emptyDiagnosticsReport,
+  summarizeDiagnostics,
+  WorkspaceDiagnosticSchema,
+  WorkspaceDiagnosticsReportSchema,
+  type DiagnosticSeverity,
+  type DiagnosticsStatus,
+  type WorkspaceDiagnostic,
+  type WorkspaceDiagnosticsPort,
+  type WorkspaceDiagnosticsReport,
+  type WorkspaceDiagnosticsRequest,
+} from "./entity/diagnostics.js";
 export type { WorkspaceAccess, WorkspaceBoundary, WorkspacePath } from "./entity/workspace.js";
 export type {
   AppEvent,

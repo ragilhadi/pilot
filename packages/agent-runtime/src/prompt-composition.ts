@@ -343,6 +343,14 @@ function snapshotEntry(
   });
 }
 
+/**
+ * Correlates a tool result with its call. Scoped by run so two runs that reuse a provider call id
+ * never collide, and joined with a character that cannot occur in either half.
+ */
+function toolExchangeKey(runIdentifier: string | undefined, callId: string): string {
+  return `${runIdentifier ?? "no-run"}\u0000${callId}`;
+}
+
 interface ExchangeGroups {
   /** Maps each message id to the id of the atomic tool-exchange group it belongs to. */
   readonly groupOf: ReadonlyMap<string, string>;
@@ -372,14 +380,14 @@ function computeExchangeGroups(history: readonly AgentMessage[]): ExchangeGroups
     if (calls.length > 0) {
       assign(message.id, message.id);
       for (const call of calls) {
-        groupByCall.set(`${message.runId ?? "no-run"} ${call.callId}`, message.id);
+        groupByCall.set(toolExchangeKey(message.runId, call.callId), message.id);
       }
       continue;
     }
     if (results.length > 0) {
       let groupId: string | undefined;
       for (const result of results) {
-        groupId = groupByCall.get(`${message.runId ?? "no-run"} ${result.callId}`);
+        groupId = groupByCall.get(toolExchangeKey(message.runId, result.callId));
         if (groupId !== undefined) break;
       }
       assign(message.id, groupId ?? message.id);
@@ -459,13 +467,13 @@ function assertAtomicToolExchanges(
       };
       groups.push(group);
       for (const call of calls) {
-        const key = `${message.runId ?? "no-run"}\u0000${call.callId}`;
+        const key = toolExchangeKey(message.runId, call.callId);
         group.pendingCalls.add(key);
         groupsByCall.set(key, group);
       }
     }
     for (const result of message.parts.filter((part) => part.type === "tool-result")) {
-      const key = `${message.runId ?? "no-run"}\u0000${result.callId}`;
+      const key = toolExchangeKey(message.runId, result.callId);
       const group = groupsByCall.get(key);
       if (group === undefined) {
         throw new ContextEngineError(

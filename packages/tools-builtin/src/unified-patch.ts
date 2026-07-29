@@ -169,8 +169,19 @@ export function parseUnifiedPatch(input: string): UnifiedPatch {
         continue;
       }
       const prefix = line[0];
+      // A blank context line loses its leading space to any tool that strips trailing whitespace,
+      // which models routinely do when emitting a diff. Treating "" as an empty context line costs
+      // nothing — no other hunk line can be empty — and removes a common, unfixable-looking failure.
       const kind =
-        prefix === " " ? "context" : prefix === "+" ? "add" : prefix === "-" ? "delete" : undefined;
+        line.length === 0
+          ? "context"
+          : prefix === " "
+            ? "context"
+            : prefix === "+"
+              ? "add"
+              : prefix === "-"
+                ? "delete"
+                : undefined;
       if (kind === undefined) {
         throw invalidPatch("Hunk lines must begin with space, +, or -", {
           patchLine: index + 1,

@@ -110,11 +110,13 @@ export {
 } from "./workspace-file-system.js";
 export {
   ChangeJournalError,
+  defaultChangeJournalContentBytes,
   InMemoryChangeJournal,
   type AppliedChangeInput,
   type ChangeJournal,
   type ChangeJournalEntry,
   type ChangeJournalOperation,
+  type InMemoryChangeJournalOptions,
   type RollbackChangeInput,
 } from "./change-journal.js";
 export {
@@ -244,3 +246,17 @@ export {
   type GitStatusOutput,
   type GitTools,
 } from "./git-tools.js";
+export {
+  collectDiagnostics,
+  describeDiagnostics,
+  DiagnosticsFieldSchema,
+  DiagnosticsReportSchema,
+  type DiagnosticsCollectorOptions,
+} from "./diagnostics-reporting.js";
+export {
+  createDiagnosticsTool,
+  DiagnosticsInputSchema,
+  DiagnosticsOutputSchema,
+  type DiagnosticsInput,
+  type DiagnosticsOutput,
+} from "./diagnostics-tool.js";
