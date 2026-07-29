@@ -173,6 +173,40 @@ describe("web_fetch tool", () => {
     ).rejects.toMatchObject({ code: "PILOT_WEB_FETCH_BLOCKED", metadata: { address: "10.0.0.5" } });
   });
 
+  // `new URL()` rewrites [::ffff:127.0.0.1] to its hex form [::ffff:7f00:1], so the old
+  // dotted-quad text match never fired and every IPv4-mapped address reached the network —
+  // including cloud metadata, which this filter exists to block.
+  it.each([
+    "http://[::ffff:127.0.0.1]/",
+    "http://[::ffff:169.254.169.254]/",
+    "http://[::ffff:10.0.0.5]/",
+    "http://[::ffff:192.168.1.1]/",
+    "http://[0:0:0:0:0:ffff:169.254.169.254]/",
+    "http://[64:ff9b::169.254.169.254]/",
+    "http://[::1]/",
+    "http://[fe80::1]/",
+    "http://[fd00::1]/",
+    "http://[2002:7f00:1::]/",
+  ])("blocks the IPv6 literal %s", async (url) => {
+    let reached: string | undefined;
+    const fetchImpl: FetchLike = async (requested) => {
+      reached = requested;
+      return textResponse("should not reach here");
+    };
+    await expect(tool(fetchImpl).execute({ url }, context())).rejects.toMatchObject({
+      code: "PILOT_WEB_FETCH_BLOCKED",
+    });
+    expect(reached).toBeUndefined();
+  });
+
+  it("still allows a public IPv6 literal", async () => {
+    const result = await tool(async () => textResponse("public")).execute(
+      { url: "http://[2606:4700:4700::1111]/" },
+      context(),
+    );
+    expect(result.output).toMatchObject({ status: 200, content: "public" });
+  });
+
   it("re-validates redirect targets and blocks a redirect to a private host", async () => {
     const fetchImpl: FetchLike = async (url) => {
       if (url === "https://example.com/start") {

@@ -196,3 +196,32 @@ describe("applyUnifiedPatchToContent", () => {
 function sha256(content: string): string {
   return createHash("sha256").update(Buffer.from(content, "utf8")).digest("hex");
 }
+
+describe("blank context lines", () => {
+  // Models routinely strip trailing whitespace when emitting a diff, which turns the single space
+  // of an empty context line into an empty line. Rejecting that produced an error the model could
+  // not act on, because the patch it "should" send was byte-identical to the one it just sent.
+  it("treats an empty hunk line as an empty context line", () => {
+    const original = "alpha\n\nbeta\n";
+    const patch = ["--- a/x.txt", "+++ b/x.txt", "@@ -1,3 +1,3 @@", " alpha", "", "-beta", "+gamma"].join(
+      "\n",
+    );
+    const applied = applyUnifiedPatchToContent({
+      patch,
+      originalContent: original,
+      baseSha256: createHash("sha256").update(Buffer.from(original, "utf8")).digest("hex"),
+    });
+    expect(applied.content).toBe("alpha\n\ngamma\n");
+  });
+
+  it("still rejects a hunk line with an unrecognized prefix", () => {
+    const original = "alpha\n";
+    expect(() =>
+      applyUnifiedPatchToContent({
+        patch: ["--- a/x.txt", "+++ b/x.txt", "@@ -1,1 +1,1 @@", "?alpha"].join("\n"),
+        originalContent: original,
+        baseSha256: createHash("sha256").update(Buffer.from(original, "utf8")).digest("hex"),
+      }),
+    ).toThrow(/space, \+, or -/u);
+  });
+});

@@ -6,6 +6,7 @@ import {
   type PermissionApprovalScopeKind,
   type PermissionDecision,
   type PermissionEvaluationContext,
+  type PermissionRuleMatcher,
   type PermissionRuleSource,
   type PermissionScope,
   PilotError,
@@ -99,7 +100,7 @@ export class PermissionCoordinator {
       reason:
         parsed.data.reason ??
         `${source === "interactive" ? "User" : "Non-interactive mode"} ${parsed.data.effect}ed the action`,
-      matcher: { kind: "any" },
+      matcher: matcherFor(parsed.data.scope, input.action, initial),
       scope,
       hard: false,
     });
@@ -147,6 +148,26 @@ function availableScopesFor(
     ...(context.workspaceId === undefined ? [] : (["workspace"] as const)),
     ...(context.applicationId === undefined ? [] : (["application"] as const)),
   ]);
+}
+
+/**
+ * Chooses what an approval covers, independently of how long it lasts.
+ *
+ * A scope answers "until when" — this call, this session, this workspace. It must never answer
+ * "which actions": pairing a scope with an `any` matcher turned "allow for session" into a blanket
+ * approval of every later tool call in that session, so approving one `npm run build` silently
+ * pre-authorized an unrelated `curl`. Every scope except `tool` therefore binds to the exact action
+ * the user reviewed, identified by its fingerprint.
+ */
+function matcherFor(
+  kind: PermissionApprovalScopeKind,
+  action: PermissionAction,
+  decision: PermissionDecision,
+): PermissionRuleMatcher {
+  if (kind === "tool" && action.kind === "tool") {
+    return { kind: "tool", toolName: action.toolName };
+  }
+  return { kind: "exact-action", fingerprint: decision.actionFingerprint };
 }
 
 function scopeFor(

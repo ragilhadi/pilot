@@ -196,15 +196,18 @@ export class ToolCallScheduler {
     signal: AbortSignal,
   ): Promise<ScheduledToolResult> {
     throwIfCancelled(signal);
-    await this.#dependencies.observer?.({
-      type: "tool.started",
-      runId,
-      callId: call.callId,
-      toolName: call.toolName,
-      input: call.input,
-    });
     let result: ScheduledToolResult;
     try {
+      // Inside the try on purpose. An observer is host bookkeeping (transcript rendering, database
+      // writes); when it throws, the blast radius must stay at this one call. Awaiting it outside
+      // let a single observer failure escape the scheduler and abort the entire run.
+      await this.#dependencies.observer?.({
+        type: "tool.started",
+        runId,
+        callId: call.callId,
+        toolName: call.toolName,
+        input: call.input,
+      });
       const registered = this.#dependencies.registry.resolve(call.toolName);
       const input = this.#dependencies.registry.parseInput(call.toolName, call.input);
       const execution = await withTimeout(

@@ -110,11 +110,13 @@ export {
 } from "./workspace-file-system.js";
 export {
   ChangeJournalError,
+  defaultChangeJournalContentBytes,
   InMemoryChangeJournal,
   type AppliedChangeInput,
   type ChangeJournal,
   type ChangeJournalEntry,
   type ChangeJournalOperation,
+  type InMemoryChangeJournalOptions,
   type RollbackChangeInput,
 } from "./change-journal.js";
 export {

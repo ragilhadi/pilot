@@ -331,6 +331,14 @@ function readCompactionMetadata(summary: AgentMessage): CompactionMetadata {
   };
 }
 
+/**
+ * Correlates a tool result with its call, scoped by run so two runs that reuse a provider call id
+ * never collide, and joined with a character that cannot occur in either half.
+ */
+function correlationKey(runIdentifier: string | undefined, callId: string): string {
+  return `${runIdentifier ?? "no-run"}\u0000${callId}`;
+}
+
 function validateCanonicalHistory(input: readonly AgentMessage[]): readonly AgentMessage[] {
   if (!Array.isArray(input) || input.length === 0 || input.length > 100_000) {
     throw new ConversationCompactionError("Canonical conversation history size is invalid");
@@ -368,19 +376,19 @@ function validateCanonicalHistory(input: readonly AgentMessage[]): readonly Agen
     }
     for (const part of message.parts) {
       if (part.type === "tool-call") {
-        const correlationKey = `${message.runId ?? "no-run"}\u0000${part.callId}`;
-        if (toolCallIds.has(correlationKey)) {
+        const key = correlationKey(message.runId, part.callId);
+        if (toolCallIds.has(key)) {
           throw new ConversationCompactionError(
             "Conversation history reuses a tool-call identifier",
             { messageId: message.id, callId: part.callId },
           );
         }
-        toolCallIds.add(correlationKey);
-        outstandingToolCalls.add(correlationKey);
+        toolCallIds.add(key);
+        outstandingToolCalls.add(key);
       }
       if (part.type === "tool-result") {
-        const correlationKey = `${message.runId ?? "no-run"}\u0000${part.callId}`;
-        if (!outstandingToolCalls.delete(correlationKey)) {
+        const key = correlationKey(message.runId, part.callId);
+        if (!outstandingToolCalls.delete(key)) {
           throw new ConversationCompactionError(
             "Conversation history contains an uncorrelated tool result",
             { messageId: message.id, callId: part.callId },
@@ -406,8 +414,13 @@ function hasCompleteToolExchanges(messages: readonly AgentMessage[]): boolean {
   const outstanding = new Set<string>();
   for (const message of messages) {
     for (const part of message.parts) {
-      if (part.type === "tool-call") outstanding.add(part.callId);
-      if (part.type === "tool-result") outstanding.delete(part.callId);
+      // Scoped by run, matching validateCanonicalHistory. Keying on the bare call id let two runs
+      // that reused a provider call id cancel each other out, so a prefix with a genuinely
+      // unanswered tool call could be reported complete and then compacted.
+      if (part.type === "tool-call") outstanding.add(correlationKey(message.runId, part.callId));
+      if (part.type === "tool-result") {
+        outstanding.delete(correlationKey(message.runId, part.callId));
+      }
     }
   }
   return outstanding.size === 0;

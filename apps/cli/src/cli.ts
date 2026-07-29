@@ -37,6 +37,7 @@ import {
   SessionError,
   sessionId,
   toSafeErrorSnapshot,
+  type ToolRisk,
   type WorkspaceBoundary,
 } from "@pilotrun/core";
 import {
@@ -1334,40 +1335,36 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
           nextToolSequence.set(event.runId, sequence);
           const startedAt = dependencies.clock.now().toISOString();
           persistedCalls.set(key, { sequence, startedAt, input: event.input });
-          const risk = tools.resolve(event.toolName).definition.metadata.risk;
+          const risk = riskOfTool(tools, event.toolName);
           await dependencies.persistence.repositories.toolActivity.saveCall({
             runId: event.runId,
             callId: event.callId,
             sequence,
             toolName: event.toolName,
             risk,
-            replaySafety:
-              risk === "read-only"
-                ? "safe"
-                : risk === "network" || risk === "unknown"
-                  ? "unknown"
-                  : "unsafe",
+            replaySafety: replaySafetyForRisk(risk),
             status: "running",
             input: event.input,
             startedAt,
           });
         } else {
-          const started = persistedCalls.get(key);
-          if (started === undefined) throw new Error(`Missing started tool record ${event.callId}`);
+          // A tool.started record is normally present, but it is not worth failing a finished tool
+          // call over: fall back to a fresh sequence so the completion is still recorded.
+          const started = persistedCalls.get(key) ?? {
+            sequence: (nextToolSequence.get(event.runId) ?? 0) + 1,
+            startedAt: dependencies.clock.now().toISOString(),
+            input: event.output,
+          };
+          nextToolSequence.set(event.runId, Math.max(nextToolSequence.get(event.runId) ?? 0, started.sequence));
           const completedAt = dependencies.clock.now().toISOString();
-          const risk = tools.resolve(event.toolName).definition.metadata.risk;
+          const risk = riskOfTool(tools, event.toolName);
           await dependencies.persistence.repositories.toolActivity.saveCall({
             runId: event.runId,
             callId: event.callId,
             sequence: started.sequence,
             toolName: event.toolName,
             risk,
-            replaySafety:
-              risk === "read-only"
-                ? "safe"
-                : risk === "network" || risk === "unknown"
-                  ? "unknown"
-                  : "unsafe",
+            replaySafety: replaySafetyForRisk(risk),
             status: event.isError ? "failed" : "completed",
             input: started.input,
             startedAt: started.startedAt,
@@ -1442,7 +1439,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       emit({
         type: "chat.help",
         sessionId: id,
-        payload: { commands: ["/help", "/context", "/abort", "/exit"] },
+        payload: { commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"] },
       });
       continue;
     }
@@ -1456,8 +1453,14 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       });
       continue;
     }
-    if (text.startsWith("/model ")) {
-      const requestedModelKey = text.slice("/model ".length).trim();
+    if (text === "/model" || text.startsWith("/model ")) {
+      const requestedModelKey = text.slice("/model".length).trim();
+      if (requestedModelKey.length === 0) {
+        dependencies.stderr.write(
+          `Usage: /model provider/model. Active model is ${activeModelKey}.\n`,
+        );
+        continue;
+      }
       if (!dependencies.registry.has(requestedModelKey)) {
         dependencies.stderr.write(
           `Unknown model ${requestedModelKey}. Run pilot models to list available models.\n`,
@@ -1574,7 +1577,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
           emit({
             type: "chat.help",
             sessionId: id,
-            payload: { commands: ["/help", "/context", "/abort", "/exit"] },
+            payload: { commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"] },
           });
         }
         if (followUpText === "/context") {
@@ -1709,6 +1712,23 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   }
 
   return 0;
+}
+
+/**
+ * Risk of a tool that may not be registered.
+ *
+ * The scheduler emits `tool.started` before it resolves the tool, so a name the model invented
+ * reaches this observer. Resolving it unconditionally threw `ToolNotFoundError` out of the observer,
+ * which the scheduler awaits outside its own try block — turning a recoverable "no such tool" result
+ * into a failed run that discarded the whole turn.
+ */
+function riskOfTool(registry: ToolRegistry, toolName: string): ToolRisk {
+  return registry.has(toolName) ? registry.resolve(toolName).definition.metadata.risk : "unknown";
+}
+
+function replaySafetyForRisk(risk: ToolRisk): "safe" | "unknown" | "unsafe" {
+  if (risk === "read-only") return "safe";
+  return risk === "network" || risk === "unknown" ? "unknown" : "unsafe";
 }
 
 function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
