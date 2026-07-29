@@ -99,6 +99,30 @@ function cliDependencies(
   };
 }
 
+/**
+ * Feeds lines, holding each back until a condition is true.
+ *
+ * Timing a follow-up with a fixed delay races the model actually starting to stream: on a loaded
+ * runner the line can land before the first run begins, and then it is a fresh prompt rather than
+ * the queued follow-up the test is about. Gating on observable state says what the test means and
+ * cannot lose that race.
+ */
+function gatedLines(
+  entries: readonly { readonly line?: string; readonly until?: () => boolean }[],
+): LineReader {
+  let index = 0;
+  return {
+    async readLine() {
+      const entry = entries[index];
+      index += 1;
+      while (entry?.until?.() === false) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+      return entry?.line;
+    },
+  };
+}
+
 function timedLines(
   entries: readonly { readonly line?: string; readonly delayMs?: number }[],
 ): LineReader {
@@ -1171,7 +1195,13 @@ describe("pilot chat", () => {
     const { dependencies, stdout } = cliDependencies(
       registry,
       new AbortController().signal,
-      timedLines([{ line: "Original" }, { line: "Changed direction", delayMs: 20 }, {}]),
+      gatedLines([
+        { line: "Original" },
+        // Held until the first stream is genuinely in flight, so this is always a follow-up
+        // arriving mid-response rather than a second prompt.
+        { line: "Changed direction", until: () => model.calls.length >= 1 },
+        {},
+      ]),
     );
 
     expect(await runCli(["chat", "--model", "fake/follow-up"], dependencies)).toBe(0);
