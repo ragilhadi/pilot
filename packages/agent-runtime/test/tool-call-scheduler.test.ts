@@ -398,7 +398,9 @@ describe("ToolCallScheduler observer isolation", () => {
   // observer that threw — the CLI resolved every tool name to read its risk, which throws for a
   // name the model invented — escaped the scheduler and aborted the entire run.
   it("contains a failing tool.started observer to the one call", async () => {
-    const registry = new ToolRegistry([tool("echo", "exclusive", async ({ value }) => ({ output: { value } }))]);
+    const registry = new ToolRegistry([
+      tool("echo", "exclusive", async ({ value }) => ({ output: { value } })),
+    ]);
     const scheduler = new ToolCallScheduler({
       registry,
       observer: (event) => {
@@ -410,9 +412,7 @@ describe("ToolCallScheduler observer isolation", () => {
 
     const results = await scheduler.execute({
       runId: runId("run-observer"),
-      calls: [
-        call("call-1", "echo", "a"),
-      ],
+      calls: [call("call-1", "echo", "a")],
       signal: new AbortController().signal,
     });
 
@@ -422,7 +422,9 @@ describe("ToolCallScheduler observer isolation", () => {
 
   it("returns a recoverable result for a tool that is not registered", async () => {
     const scheduler = new ToolCallScheduler({
-      registry: new ToolRegistry([tool("echo", "exclusive", async ({ value }) => ({ output: { value } }))]),
+      registry: new ToolRegistry([
+        tool("echo", "exclusive", async ({ value }) => ({ output: { value } })),
+      ]),
     });
     const results = await scheduler.execute({
       runId: runId("run-unknown"),

@@ -1355,7 +1355,10 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
             startedAt: dependencies.clock.now().toISOString(),
             input: event.output,
           };
-          nextToolSequence.set(event.runId, Math.max(nextToolSequence.get(event.runId) ?? 0, started.sequence));
+          nextToolSequence.set(
+            event.runId,
+            Math.max(nextToolSequence.get(event.runId) ?? 0, started.sequence),
+          );
           const completedAt = dependencies.clock.now().toISOString();
           const risk = riskOfTool(tools, event.toolName);
           await dependencies.persistence.repositories.toolActivity.saveCall({
@@ -1577,7 +1580,9 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
           emit({
             type: "chat.help",
             sessionId: id,
-            payload: { commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"] },
+            payload: {
+              commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"],
+            },
           });
         }
         if (followUpText === "/context") {

@@ -47,7 +47,11 @@ describe("classifyCommandRisk", () => {
 
   it("does not read a filename containing 'f' as git clean --force", () => {
     expect(
-      classifyCommandRisk({ mode: "direct", executable: "git", args: ["clean", "--dry-run", "foo.txt"] }),
+      classifyCommandRisk({
+        mode: "direct",
+        executable: "git",
+        args: ["clean", "--dry-run", "foo.txt"],
+      }),
     ).not.toMatchObject({ risk: "destructive" });
     expect(
       classifyCommandRisk({ mode: "direct", executable: "git", args: ["clean", "-fd"] }),

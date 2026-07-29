@@ -300,7 +300,9 @@ function isPipedToInterpreter(command: string): boolean {
   const [source = "", ...rest] = lowered.split("|");
   return (
     /\b(?:curl|wget|iwr|invoke-webrequest)\b/u.test(source) &&
-    rest.some((stage) => /(?:^|\s)(?:sh|bash|zsh|powershell|pwsh|python3?|node|ruby|perl)\b/u.test(stage))
+    rest.some((stage) =>
+      /(?:^|\s)(?:sh|bash|zsh|powershell|pwsh|python3?|node|ruby|perl)\b/u.test(stage),
+    )
   );
 }
 
