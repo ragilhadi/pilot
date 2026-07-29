@@ -6,7 +6,12 @@ import type { InteractiveChatPresentation } from "../presentation/chat-presentat
 import type { TerminalCapabilitySnapshot } from "../presentation/presentation-mode.js";
 import { copyToClipboard } from "./clipboard.js";
 import { type CodeBlock, extractCodeBlocks } from "./code-blocks.js";
-import { DismissableDialog, overlayOptions, SelectionDialog } from "./components/dialogs.js";
+import {
+  ConfirmDialog,
+  DismissableDialog,
+  overlayOptions,
+  SelectionDialog,
+} from "./components/dialogs.js";
 import { PermissionDialog } from "./components/permission-dialog.js";
 import { QuestionDialog } from "./components/question-dialog.js";
 import { PilotFooter } from "./components/footer.js";
@@ -82,6 +87,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   #closed = false;
   #submissionSequence = 0;
   #permissionOverlayRequestId: string | undefined;
+  #exitConfirmVisible = false;
   #questionOverlay: { readonly requestId: string; readonly hide: () => void } | undefined;
   #lastIdleInterruptAt = Number.NEGATIVE_INFINITY;
   #themeMode: PilotThemeMode;
@@ -245,6 +251,10 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#showToolsOverlay();
       return;
     }
+    if (text === "/exit" || text === "/quit") {
+      this.#requestExit();
+      return;
+    }
     this.#submissionSequence += 1;
     this.#state = reduceTerminalUi(this.#state, {
       type: "composer.submitted",
@@ -276,12 +286,18 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#tui.requestRender();
       return { consume: true };
     }
+    // Ctrl+X was advertised nowhere and did nothing. It is now the deliberate way out, and — like
+    // Ctrl+D — asks before ending the session, because a chat cannot be resumed in place.
+    if (matchesKey(data, Key.ctrl("x"))) {
+      this.#requestExit();
+      return { consume: true };
+    }
     if (
       matchesKey(data, Key.ctrl("d")) &&
       this.#state.phase === "ready" &&
       this.#editor.getText().length === 0
     ) {
-      this.#enqueue("/exit");
+      this.#requestExit();
       return { consume: true };
     }
     if (matchesKey(data, Key.escape) && this.#state.phase !== "ready") {
@@ -323,6 +339,43 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     return undefined;
   }
 
+  /**
+   * Asks before ending the session.
+   *
+   * Ctrl+C twice in a row stays immediate: the double press is its own confirmation, and it is the
+   * key people reach for when they want out now.
+   */
+  #requestExit(): void {
+    if (this.#exitConfirmVisible) return;
+    const busy = this.#state.phase !== "ready" && this.#state.phase !== "starting";
+    const dialog = new ConfirmDialog(
+      "Are you sure you want to exit?",
+      [
+        "",
+        ...(busy
+          ? ["A turn is still running. Exiting cancels it and discards the in-flight response."]
+          : []),
+        this.#state.sessionId === undefined
+          ? "This chat session ends."
+          : `Resume later with: pilot chat --session ${this.#state.sessionId}`,
+      ],
+      this.#theme,
+      { confirm: "Exit Pilot", cancel: "Keep working" },
+    );
+    const handle = this.#tui.showOverlay(dialog, overlayOptions(46));
+    this.#exitConfirmVisible = true;
+    const dismiss = () => {
+      this.#exitConfirmVisible = false;
+      handle.hide();
+      this.#tui.requestRender();
+    };
+    dialog.onConfirm = () => {
+      dismiss();
+      this.#enqueue("/exit");
+    };
+    dialog.onCancel = dismiss;
+  }
+
   #showHelpOverlay(): void {
     const dialog = new DismissableDialog(
       "Pilot shortcuts",
@@ -336,8 +389,9 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "Ctrl+T       Toggle model thinking (reasoning)",
         "Ctrl+Y       Copy a code block (empty composer)",
         "Ctrl+L       Redraw terminal",
-        "Ctrl+C       Cancel, clear, then exit on second idle press",
-        "Ctrl+D       Exit when the ready composer is empty",
+        "Ctrl+X       Exit (asks to confirm)",
+        "Ctrl+D       Exit when the ready composer is empty (asks to confirm)",
+        "Ctrl+C       Cancel, clear, then exit immediately on second idle press",
         "",
         "/context     Inspect model-facing context",
         "/models      Select the model used by the next turn",
