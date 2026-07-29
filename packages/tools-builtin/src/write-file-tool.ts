@@ -3,6 +3,11 @@ import { defineTool, PilotError, type ToolDefinition } from "@pilotrun/core";
 import * as z from "zod";
 import type { ChangeJournal } from "./change-journal.js";
 import type { WorkspaceFileSystem } from "./workspace-file-system.js";
+import {
+  collectDiagnostics,
+  DiagnosticsReportSchema,
+  type DiagnosticsCollectorOptions,
+} from "./diagnostics-reporting.js";
 
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
@@ -38,6 +43,7 @@ export const WriteFileOutputSchema = z
     lineCount: z.number().int().nonnegative(),
     created: z.boolean(),
     journalSequence: z.number().int().positive(),
+    diagnostics: DiagnosticsReportSchema.optional(),
   })
   .strict()
   .readonly();
@@ -48,6 +54,7 @@ export type WriteFileOutput = z.output<typeof WriteFileOutputSchema>;
 export function createWriteFileTool(
   fileSystem: WorkspaceFileSystem,
   journal: ChangeJournal,
+  options: DiagnosticsCollectorOptions = {},
 ): ToolDefinition<typeof WriteFileInputSchema, typeof WriteFileOutputSchema> {
   return defineTool({
     name: "write_file",
@@ -76,6 +83,12 @@ export function createWriteFileTool(
           content: input.content,
           signal: context.signal,
         });
+        const diagnostics = await collectDiagnostics(
+          options.port,
+          created.path,
+          input.content,
+          context.signal,
+        );
         const entry = journal.recordApplied({
           runId: context.runId,
           callId: context.callId,
@@ -94,6 +107,7 @@ export function createWriteFileTool(
             lineCount,
             created: true,
             journalSequence: entry.sequence,
+            ...(diagnostics === undefined ? {} : { diagnostics }),
           }),
           metadata: {
             changed: true,
@@ -114,6 +128,12 @@ export function createWriteFileTool(
         content: input.content,
         signal: context.signal,
       });
+      const diagnostics = await collectDiagnostics(
+        options.port,
+        replacement.path,
+        input.content,
+        context.signal,
+      );
       const entry = journal.recordApplied({
         runId: context.runId,
         callId: context.callId,
@@ -132,6 +152,7 @@ export function createWriteFileTool(
           lineCount,
           created: false,
           journalSequence: entry.sequence,
+          ...(diagnostics === undefined ? {} : { diagnostics }),
         }),
         metadata: {
           changed: true,
