@@ -84,10 +84,7 @@ function validateLayerAuthority(layer: ConfigurationLayer, value: ConfigurationL
       { source: layer.source, location: layer.location, path: "persistence.dataDirectory" },
     );
   }
-  if (
-    (layer.source === "project" || layer.source === "session") &&
-    value.webSearch !== undefined
-  ) {
+  if ((layer.source === "project" || layer.source === "session") && value.webSearch !== undefined) {
     throw new ConfigurationError(
       `${layer.source} configuration cannot select a web-search credential`,
       { source: layer.source, location: layer.location, path: "webSearch" },

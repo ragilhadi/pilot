@@ -222,10 +222,7 @@ export function createTavilyWebSearchProvider(
   options: TavilyWebSearchProviderOptions,
 ): WebSearchProvider {
   if (options.apiKey.trim().length === 0) {
-    throw new WebSearchToolError(
-      "PILOT_WEB_SEARCH_AUTHENTICATION",
-      "The Tavily API key is empty",
-    );
+    throw new WebSearchToolError("PILOT_WEB_SEARCH_AUTHENTICATION", "The Tavily API key is empty");
   }
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const endpoint = options.endpoint ?? tavilySearchEndpoint;
