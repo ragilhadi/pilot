@@ -76,9 +76,7 @@ function resolveFrom(specifier: string, directories: readonly string[]): string 
   for (const directory of directories) {
     try {
       return createRequire(path.join(directory, "package.json")).resolve(specifier);
-    } catch {
-      continue;
-    }
+    } catch {}
   }
   return undefined;
 }

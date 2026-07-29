@@ -45,7 +45,9 @@ export interface LanguageServerClientOptions {
   /** Workspace root, used as a fallback when resolving server-side tooling. */
   readonly workspaceRoot?: string;
   /** Injected in tests to avoid spawning a real server. */
-  readonly spawnProcess?: () => ChildProcessWithoutNullStreams | Promise<ChildProcessWithoutNullStreams>;
+  readonly spawnProcess?: () =>
+    | ChildProcessWithoutNullStreams
+    | Promise<ChildProcessWithoutNullStreams>;
   readonly now?: () => number;
 }
 
@@ -62,7 +64,9 @@ export class LanguageServerClient {
   readonly rootPath: string;
   readonly #workspaceRoot: string;
   readonly #now: () => number;
-  readonly #spawnProcess: () => ChildProcessWithoutNullStreams | Promise<ChildProcessWithoutNullStreams>;
+  readonly #spawnProcess: () =>
+    | ChildProcessWithoutNullStreams
+    | Promise<ChildProcessWithoutNullStreams>;
   readonly #decoder = new MessageDecoder();
   readonly #pending = new Map<number, PendingRequest>();
   readonly #diagnostics = new Map<string, PublishedDiagnostics>();
@@ -156,7 +160,10 @@ export class LanguageServerClient {
         clientInfo: { name: "pilot" },
         rootUri: pathToFileUri(this.rootPath),
         workspaceFolders: [
-          { uri: pathToFileUri(this.rootPath), name: this.rootPath.split(/[\\/]/u).at(-1) ?? "root" },
+          {
+            uri: pathToFileUri(this.rootPath),
+            name: this.rootPath.split(/[\\/]/u).at(-1) ?? "root",
+          },
         ],
         capabilities: {
           textDocument: {
@@ -233,7 +240,7 @@ export class LanguageServerClient {
     return this.#awaitPublish(uri, fresh, timeoutMs, signal);
   }
 
-/**
+  /**
    * Asks the server for this document's diagnostics and waits for the answer.
    *
    * A pull response describes the document the server has just been told about, so it is fresh by

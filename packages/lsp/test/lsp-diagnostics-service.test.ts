@@ -17,7 +17,9 @@ const signal = () => new AbortController().signal;
 const workspaces: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(workspaces.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  await Promise.all(
+    workspaces.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+  );
 });
 
 async function workspace(files: readonly string[]): Promise<string> {
@@ -111,7 +113,9 @@ describe("LspDiagnosticsService", () => {
   it("reports errors for the file just written", async () => {
     const root = await workspace(["tsconfig.json", "src/index.ts"]);
     const { subject } = service(root, {
-      publishOnVersion: () => [diagnostic(4, 2, "Type 'string' is not assignable to type 'number'.")],
+      publishOnVersion: () => [
+        diagnostic(4, 2, "Type 'string' is not assignable to type 'number'."),
+      ],
     });
 
     const report = await subject.check({

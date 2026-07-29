@@ -9,7 +9,6 @@ import {
   type DiagnosticsCollectorOptions,
 } from "./diagnostics-reporting.js";
 
-
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 
 /** SHA-256 of the empty string; the "before" state of any newly created file. */

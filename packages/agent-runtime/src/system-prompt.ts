@@ -96,7 +96,7 @@ export function composeSystemPrompt(input: SystemPromptInput): string {
         "Every successful write returns a `diagnostics` field holding the language server's view " +
           "of the file you just wrote. Read it before moving on:",
         '- `status` `"ready"` with an empty `items` means the file is clean.',
-        "- `status` `\"ready\"` with items means your change has errors. Fix them now, in this " +
+        '- `status` `"ready"` with items means your change has errors. Fix them now, in this ' +
           "turn — they are yours, and they are cheaper to fix here than after you have moved on.",
         '- `status` `"unavailable"`, `"timeout"`, or `"unsupported"` means nothing was checked. ' +
           "Do not read that as a clean result; verify another way if the change was risky.",

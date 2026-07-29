@@ -4,7 +4,12 @@ import { encodeMessage, LanguageServerProtocolError, MessageDecoder } from "../s
 describe("LSP base protocol framing", () => {
   it("round-trips a message", () => {
     const decoder = new MessageDecoder();
-    const encoded = encodeMessage({ jsonrpc: "2.0", id: 1, method: "initialize", params: { a: 1 } });
+    const encoded = encodeMessage({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { a: 1 },
+    });
     expect(decoder.push(encoded)).toEqual([
       { jsonrpc: "2.0", id: 1, method: "initialize", params: { a: 1 } },
     ]);

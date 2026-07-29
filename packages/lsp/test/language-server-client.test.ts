@@ -1,7 +1,11 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { LanguageServerClient, pathToFileUri, typescriptLanguageServer } from "../src/index.js";
-import { createFakeLanguageServer, diagnostic, type FakeServerOptions } from "./fake-language-server.js";
+import {
+  createFakeLanguageServer,
+  diagnostic,
+  type FakeServerOptions,
+} from "./fake-language-server.js";
 
 const workspace = path.resolve("/workspace/project");
 const file = path.join(workspace, "src", "index.ts");
@@ -25,11 +29,7 @@ describe("LanguageServerClient", () => {
     const methods = server.received.flatMap((message) =>
       "method" in message ? [message.method] : [],
     );
-    expect(methods.slice(0, 3)).toEqual([
-      "initialize",
-      "initialized",
-      "textDocument/didOpen",
-    ]);
+    expect(methods.slice(0, 3)).toEqual(["initialize", "initialized", "textDocument/didOpen"]);
   });
 
   it("opens a document once and sends didChange afterwards", async () => {
@@ -175,7 +175,14 @@ describe("pull diagnostics", () => {
     const items = await subject.diagnose(file, "x", ".ts", 500, signal());
 
     expect(items).toEqual([
-      { severity: "error", line: 3, column: 5, message: "pulled error", source: "ts", code: "2339" },
+      {
+        severity: "error",
+        line: 3,
+        column: 5,
+        message: "pulled error",
+        source: "ts",
+        code: "2339",
+      },
     ]);
     const methods = server.received.flatMap((message) =>
       "method" in message ? [message.method] : [],
@@ -186,8 +193,7 @@ describe("pull diagnostics", () => {
   it("still reflects the newest content on a second check", async () => {
     const { subject } = client({
       pullDiagnostics: true,
-      publishOnVersion: (version) =>
-        version === 1 ? [diagnostic(0, 0, "first revision")] : [],
+      publishOnVersion: (version) => (version === 1 ? [diagnostic(0, 0, "first revision")] : []),
     });
     expect((await subject.diagnose(file, "a", ".ts", 500, signal()))?.[0]?.message).toBe(
       "first revision",

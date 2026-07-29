@@ -57,7 +57,9 @@ export function createFakeLanguageServer(options: FakeServerOptions = {}): FakeL
         result: {
           capabilities: {
             textDocumentSync: 1,
-            ...(options.pullDiagnostics ? { diagnosticProvider: { interFileDependencies: true } } : {}),
+            ...(options.pullDiagnostics
+              ? { diagnosticProvider: { interFileDependencies: true } }
+              : {}),
           },
         },
       });
@@ -77,10 +79,7 @@ export function createFakeLanguageServer(options: FakeServerOptions = {}): FakeL
       send({ jsonrpc: "2.0", id: (message as { id: number }).id, result: null });
       return;
     }
-    if (
-      message.method === "textDocument/didOpen" ||
-      message.method === "textDocument/didChange"
-    ) {
+    if (message.method === "textDocument/didOpen" || message.method === "textDocument/didChange") {
       const params = message.params as {
         textDocument: { uri: string; version: number };
       };
