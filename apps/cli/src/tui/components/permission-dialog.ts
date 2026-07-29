@@ -5,26 +5,42 @@ import {
   SelectList,
   type SelectItem,
 } from "@earendil-works/pi-tui";
-import type { PermissionApprovalRequest } from "@pilotrun/core";
+import type { PermissionApprovalRequest, PermissionApprovalScopeKind } from "@pilotrun/core";
 import { sanitizeTerminalText } from "../../presentation/sanitize-terminal-text.js";
-import {
-  frameOverlay,
-  patchFromInput,
-  previewLines,
-  safeJson,
-  styleDiffLine,
-  wrapPlain,
-} from "../render-helpers.js";
+import { frameOverlay, styleDiffLine, wrapPlain } from "../render-helpers.js";
 import type { PilotTheme } from "../theme.js";
+import {
+  permissionPreview,
+  summarizePermissionAction,
+  type PermissionPreview,
+  type PermissionSummaryRow,
+} from "./permission-summary.js";
+
+/**
+ * What each broader scope actually grants.
+ *
+ * These are deliberately concrete. "Broader approval permitted by policy" told the user nothing
+ * about breadth or duration, which matters: every scope below is bound to this exact action, and
+ * only differs in how long the approval survives.
+ */
+const scopeDescriptions: Readonly<Record<PermissionApprovalScopeKind, string>> = Object.freeze({
+  once: "Just this call",
+  "exact-action": "This same action, whenever it recurs",
+  session: "This same action, for the rest of this session",
+  tool: "Any use of this tool, for the rest of this session",
+  workspace: "This same action, anywhere in this workspace",
+  application: "This same action, everywhere Pilot runs",
+});
 
 export class PermissionDialog implements Component {
   readonly #request: PermissionApprovalRequest;
   readonly #theme: PilotTheme;
-  readonly #patch: string | undefined;
+  readonly #summary: readonly PermissionSummaryRow[];
+  readonly #preview: PermissionPreview | undefined;
   readonly #rows: number;
   #list: SelectList;
-  #mode: "decision" | "diff" | "more" = "decision";
-  #diffOffset = 0;
+  #mode: "decision" | "preview" | "more" = "decision";
+  #previewOffset = 0;
   onResponse?: (response: string) => void;
   onCancel?: () => void;
 
@@ -36,10 +52,8 @@ export class PermissionDialog implements Component {
     this.#request = request;
     this.#theme = theme;
     this.#rows = capabilities?.rows ?? 30;
-    this.#patch =
-      request.action.kind === "tool" && request.action.toolName === "apply_patch"
-        ? patchFromInput(request.action.input)
-        : undefined;
+    this.#summary = summarizePermissionAction(request.action);
+    this.#preview = permissionPreview(request.action);
     this.#list = new SelectList([], 8, theme.select);
     this.#showDecisionList();
   }
@@ -54,7 +68,7 @@ export class PermissionDialog implements Component {
             {
               value: "more",
               label: "More options...",
-              description: "Review broader policy-supported scopes",
+              description: "Approve for longer than this one call",
             },
           ]
         : []),
@@ -75,7 +89,7 @@ export class PermissionDialog implements Component {
         .map((scope) => ({
           value: `allow ${scope}`,
           label: `Allow for ${scope}`,
-          description: "Broader approval permitted by policy",
+          description: scopeDescriptions[scope],
         })),
       { value: "back", label: "Back", description: "Return without approving" },
     ];
@@ -92,12 +106,13 @@ export class PermissionDialog implements Component {
   }
 
   handleInput(data: string): void {
-    if (this.#mode === "diff") {
-      if (matchesKey(data, Key.up)) this.#diffOffset = Math.max(0, this.#diffOffset - 1);
-      else if (matchesKey(data, Key.down)) this.#diffOffset += 1;
-      else if (matchesKey(data, Key.pageUp)) this.#diffOffset = Math.max(0, this.#diffOffset - 10);
-      else if (matchesKey(data, Key.pageDown)) this.#diffOffset += 10;
-      else if (matchesKey(data, Key.home)) this.#diffOffset = 0;
+    if (this.#mode === "preview") {
+      if (matchesKey(data, Key.up)) this.#previewOffset = Math.max(0, this.#previewOffset - 1);
+      else if (matchesKey(data, Key.down)) this.#previewOffset += 1;
+      else if (matchesKey(data, Key.pageUp))
+        this.#previewOffset = Math.max(0, this.#previewOffset - 10);
+      else if (matchesKey(data, Key.pageDown)) this.#previewOffset += 10;
+      else if (matchesKey(data, Key.home)) this.#previewOffset = 0;
       else if (
         matchesKey(data, Key.escape) ||
         matchesKey(data, Key.enter) ||
@@ -108,8 +123,8 @@ export class PermissionDialog implements Component {
       }
       return;
     }
-    if (data === "d" && this.#patch !== undefined) {
-      this.#mode = "diff";
+    if (data === "d" && this.#preview !== undefined) {
+      this.#mode = "preview";
       return;
     }
     this.#list.handleInput(data);
@@ -117,32 +132,22 @@ export class PermissionDialog implements Component {
 
   render(width: number): string[] {
     const innerWidth = Math.max(1, width - 4);
-    if (this.#mode === "diff" && this.#patch !== undefined) {
-      return this.#renderDiff(width, innerWidth);
+    if (this.#mode === "preview" && this.#preview !== undefined) {
+      return this.#renderPreview(width, innerWidth, this.#preview);
     }
-    const action = this.#request.action;
-    const target =
-      action.kind === "command"
-        ? `${action.executable} ${action.args.join(" ")}`.trim()
-        : `${action.toolName} ${safeJson(action.input)}`;
     return frameOverlay(
       [
         this.#theme.danger("Permission required"),
-        ...wrapPlain(this.#request.policyDecision.reason, innerWidth, 0),
-        this.#theme.warning(`Risk: ${action.risk}`),
-        ...wrapPlain(sanitizeTerminalText(target), innerWidth, 0),
-        ...(this.#patch === undefined
-          ? []
-          : [
-              "",
-              this.#theme.strong("Proposed diff"),
-              ...previewLines(this.#patch, innerWidth, 5),
-              this.#theme.muted("Press d to inspect and scroll the complete diff"),
-            ]),
+        this.#theme.warning(`Risk: ${this.#request.action.risk}`),
         "",
-        ...(this.#mode === "more"
-          ? [this.#theme.warning("Broader scopes persist beyond this action")]
-          : []),
+        // One labelled row per fact that changes the answer. The payload itself lives behind `d`.
+        ...this.#summary.flatMap(({ label, value }) =>
+          wrapPlain(`${label.padEnd(12)}${sanitizeTerminalText(value)}`, innerWidth, 0),
+        ),
+        ...(this.#preview === undefined
+          ? []
+          : ["", this.#theme.muted(`Press d to review the full ${this.#preview.diff ? "diff" : "content"}`)]),
+        "",
         ...this.#list.render(innerWidth),
         "",
         this.#theme.muted(
@@ -153,23 +158,25 @@ export class PermissionDialog implements Component {
     );
   }
 
-  #renderDiff(width: number, innerWidth: number): string[] {
-    const allLines = sanitizeTerminalText(this.#patch ?? "").split(/\r?\n/u);
+  #renderPreview(width: number, innerWidth: number, preview: PermissionPreview): string[] {
+    const allLines = sanitizeTerminalText(preview.text).split(/\r?\n/u);
     // pi-tui hard-truncates an overlay taller than its maxHeight, so a fixed viewport used to slice
     // the scroll hints off the bottom on a short terminal. Size it from the rows actually available
     // (70% of the screen, less this dialog's own chrome).
     const viewportLines = Math.max(6, Math.floor(this.#rows * 0.7) - 8);
     const maximumOffset = Math.max(0, allLines.length - viewportLines);
-    this.#diffOffset = Math.min(this.#diffOffset, maximumOffset);
-    const visible = allLines.slice(this.#diffOffset, this.#diffOffset + viewportLines);
+    this.#previewOffset = Math.min(this.#previewOffset, maximumOffset);
+    const visible = allLines.slice(this.#previewOffset, this.#previewOffset + viewportLines);
     return frameOverlay(
       [
-        this.#theme.strong("Proposed diff"),
+        this.#theme.strong(preview.title),
         this.#theme.muted(
-          `Lines ${this.#diffOffset + 1}-${Math.min(allLines.length, this.#diffOffset + viewportLines)} of ${allLines.length}`,
+          `Lines ${this.#previewOffset + 1}-${Math.min(allLines.length, this.#previewOffset + viewportLines)} of ${allLines.length}`,
         ),
         "",
-        ...visible.flatMap((line) => wrapPlain(styleDiffLine(line, this.#theme), innerWidth, 0)),
+        ...visible.flatMap((line) =>
+          wrapPlain(preview.diff ? styleDiffLine(line, this.#theme) : line, innerWidth, 0),
+        ),
         "",
         this.#theme.muted("Up/Down scroll  PgUp/PgDn page  Home top  d/Esc back"),
       ],

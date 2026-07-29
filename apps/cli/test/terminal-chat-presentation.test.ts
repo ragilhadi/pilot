@@ -855,3 +855,118 @@ describe("exit confirmation", () => {
     await expect(line).resolves.toBe("/exit");
   });
 });
+
+describe("permission dialog readability", () => {
+  const presentations: TerminalChatPresentation[] = [];
+  afterEach(async () => {
+    await Promise.all(presentations.splice(0).map((presentation) => presentation.close()));
+  });
+
+  const painted = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+  function writeFileRequest(factory: ChatEventFactory, content: string) {
+    return factory.create({
+      type: "permission.requested",
+      sessionId: sessionId("session-ui"),
+      runId: runId("run-ui"),
+      payload: {
+        request: {
+          requestId: "permission-write",
+          action: {
+            kind: "tool",
+            toolName: "write_file",
+            risk: "workspace-write",
+            requiredPermissions: ["workspace.write"],
+            input: { path: "src/generated.ts", content },
+          },
+          context: {
+            runId: "run-ui",
+            callId: "call-ui",
+            sessionId: "session-ui",
+            workspaceId: "C:/workspace/pilot",
+            applicationId: "pilot-cli",
+          },
+          policyDecision: {
+            effect: "ask",
+            reason: "Workspace writes require approval",
+            actionFingerprint: `sha256:${"a".repeat(64)}`,
+            evaluatedRuleIds: ["builtin.workspace-write.ask"],
+          },
+          availableScopes: ["once", "session"],
+        },
+      },
+    });
+  }
+
+  // Writing a real file used to render its entire content inside the prompt, pushing the question
+  // and the choices off a 24-row terminal.
+  it("keeps the question and the choices visible when writing a large file", async () => {
+    const terminal = new FakeTerminal(80, 24);
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities: { ...capabilities, columns: 80, rows: 24 },
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-29T12:00:00.000Z") });
+    presentation.readLine();
+    presentation.render(writeFileRequest(factory, "const generated = true;\n".repeat(500)));
+    await painted();
+
+    const frame = terminal.output.split("\u001b[?2026h").at(-1) ?? "";
+    expect(frame).toContain("Permission required");
+    expect(frame).toContain("src/generated.ts");
+    expect(frame).toContain("500 lines");
+    expect(frame).toContain("Allow once");
+    expect(frame).toContain("Deny");
+    expect(frame).toContain("Press d to review the full content");
+    // The payload itself never reaches the prompt.
+    expect(frame).not.toContain("const generated = true;");
+  });
+
+  it("shows the content on demand and returns to the choices", async () => {
+    const terminal = new FakeTerminal(80, 24);
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities: { ...capabilities, columns: 80, rows: 24 },
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-29T12:00:00.000Z") });
+    const response = presentation.readLine();
+    presentation.render(writeFileRequest(factory, "alpha\nbeta\ngamma\n"));
+    await painted();
+
+    terminal.input("d");
+    await painted();
+    expect(terminal.output).toContain("alpha");
+    expect(terminal.output).toContain("Content for src/generated.ts");
+
+    terminal.input("\u001b");
+    await painted();
+    terminal.input("\r");
+    await expect(response).resolves.toBe("allow once");
+  });
+
+  it("spells out what each broader scope grants", async () => {
+    const terminal = new FakeTerminal();
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities,
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-29T12:00:00.000Z") });
+    presentation.readLine();
+    presentation.render(writeFileRequest(factory, "x"));
+    await painted();
+
+    terminal.input("\u001b[B");
+    terminal.input("\u001b[B");
+    terminal.input("\r");
+    await painted();
+
+    expect(terminal.output).toContain("This same action, for the rest of this session");
+    expect(terminal.output).not.toContain("Broader approval permitted by policy");
+  });
+});
