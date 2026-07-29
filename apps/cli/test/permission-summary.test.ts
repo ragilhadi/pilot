@@ -35,9 +35,13 @@ describe("summarizePermissionAction", () => {
   });
 
   it("distinguishes creating a file from overwriting one", () => {
-    expect(flatten(toolAction("write_file", { path: "a.txt", content: "hi" }))).toContain("Creates");
+    expect(flatten(toolAction("write_file", { path: "a.txt", content: "hi" }))).toContain(
+      "Creates",
+    );
     expect(
-      flatten(toolAction("write_file", { path: "a.txt", content: "hi", baseSha256: "a".repeat(64) })),
+      flatten(
+        toolAction("write_file", { path: "a.txt", content: "hi", baseSha256: "a".repeat(64) }),
+      ),
     ).toContain("Overwrites");
   });
 

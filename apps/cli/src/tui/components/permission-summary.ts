@@ -51,7 +51,11 @@ export function permissionPreview(action: PermissionAction): PermissionPreview |
   }
   const content = stringField(input, "content");
   if (content !== undefined) {
-    return { title: `Content for ${stringField(input, "path") ?? action.toolName}`, text: content, diff: false };
+    return {
+      title: `Content for ${stringField(input, "path") ?? action.toolName}`,
+      text: content,
+      diff: false,
+    };
   }
   const oldString = stringField(input, "oldString");
   const newString = stringField(input, "newString");

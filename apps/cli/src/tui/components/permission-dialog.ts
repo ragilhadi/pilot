@@ -146,7 +146,12 @@ export class PermissionDialog implements Component {
         ),
         ...(this.#preview === undefined
           ? []
-          : ["", this.#theme.muted(`Press d to review the full ${this.#preview.diff ? "diff" : "content"}`)]),
+          : [
+              "",
+              this.#theme.muted(
+                `Press d to review the full ${this.#preview.diff ? "diff" : "content"}`,
+              ),
+            ]),
         "",
         ...this.#list.render(innerWidth),
         "",
