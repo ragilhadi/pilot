@@ -102,7 +102,7 @@ describe("terminal chat presentation", () => {
     expect(terminal.title).toBe("");
   });
 
-  it("exits on Ctrl+D only when the ready composer is empty", async () => {
+  it("offers to exit on Ctrl+D only when the ready composer is empty", async () => {
     const terminal = new FakeTerminal();
     const presentation = new TerminalChatPresentation({
       terminal,
@@ -120,7 +120,10 @@ describe("terminal chat presentation", () => {
     );
     const line = presentation.readLine();
 
+    // Ctrl+D now opens the exit confirmation rather than ending the session outright.
     terminal.input("\u0004");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    terminal.input("y");
 
     await expect(line).resolves.toBe("/exit");
   });
@@ -709,3 +712,261 @@ function permissionEvent(factory: ChatEventFactory, patch = "*** Begin Patch") {
     },
   });
 }
+
+describe("exit confirmation", () => {
+  const presentations: TerminalChatPresentation[] = [];
+  afterEach(async () => {
+    await Promise.all(presentations.splice(0).map((presentation) => presentation.close()));
+  });
+
+  const painted = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+  function started(terminal: FakeTerminal) {
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities,
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    // One factory per presentation: its event sequence has to keep increasing or the reducer
+    // discards the later events as stale.
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-29T12:00:00.000Z") });
+    presentation.render(
+      factory.create({
+        type: "chat.started",
+        sessionId: sessionId("session-exit"),
+        payload: { modelKey: "fake/test" },
+      }),
+    );
+    return { presentation, factory };
+  }
+
+  /** Resolves to the next line, or "pending" when none arrives. */
+  async function settled(line: Promise<string | undefined>) {
+    return Promise.race([line, painted().then(() => "pending" as const)]);
+  }
+
+  it("asks before exiting on Ctrl+X and stays put when cancelled", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation } = started(terminal);
+    const line = presentation.readLine();
+
+    terminal.input("\u0018");
+    await painted();
+    expect(terminal.output).toContain("Are you sure you want to exit?");
+    await expect(settled(line)).resolves.toBe("pending");
+
+    terminal.input("n");
+    await expect(settled(line)).resolves.toBe("pending");
+  });
+
+  it("exits once the confirmation is accepted", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation } = started(terminal);
+    const line = presentation.readLine();
+
+    terminal.input("\u0018");
+    await painted();
+    terminal.input("y");
+
+    await expect(line).resolves.toBe("/exit");
+  });
+
+  it("offers the resume command for the active session", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation: _unused } = started(terminal);
+    terminal.input("\u0018");
+    await painted();
+    expect(terminal.output).toContain("pilot chat --session session-exit");
+  });
+
+  it("routes Ctrl+D through the same confirmation", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation } = started(terminal);
+    const line = presentation.readLine();
+
+    terminal.input("\u0004");
+    await painted();
+    expect(terminal.output).toContain("Are you sure you want to exit?");
+    await expect(settled(line)).resolves.toBe("pending");
+
+    terminal.input("y");
+    await expect(line).resolves.toBe("/exit");
+  });
+
+  it("routes a typed /exit through the same confirmation", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation } = started(terminal);
+    const line = presentation.readLine();
+
+    for (const character of "/exit") terminal.input(character);
+    terminal.input("\r");
+    await painted();
+    expect(terminal.output).toContain("Are you sure you want to exit?");
+    await expect(settled(line)).resolves.toBe("pending");
+
+    terminal.input("y");
+    await expect(line).resolves.toBe("/exit");
+  });
+
+  it("escape cancels the confirmation and a later Ctrl+X reopens it", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation } = started(terminal);
+    const line = presentation.readLine();
+
+    terminal.input("\u0018");
+    await painted();
+    terminal.input("\u001b");
+    await expect(settled(line)).resolves.toBe("pending");
+
+    terminal.input("\u0018");
+    await painted();
+    terminal.input("y");
+    await expect(line).resolves.toBe("/exit");
+  });
+
+  it("warns that a running turn will be cancelled", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation, factory } = started(terminal);
+    presentation.render(
+      factory.create({
+        type: "model.stream",
+        sessionId: sessionId("session-exit"),
+        runId: runId("run-exit"),
+        payload: {
+          event: { type: "response.started", sequence: 0, responseId: "response-exit" },
+        },
+      }),
+    );
+
+    terminal.input("\u0018");
+    await painted();
+    expect(terminal.output).toContain("A turn is still running");
+  });
+
+  it("keeps the second idle Ctrl+C immediate", async () => {
+    const terminal = new FakeTerminal();
+    const { presentation } = started(terminal);
+    const line = presentation.readLine();
+
+    terminal.input("\u0003");
+    terminal.input("\u0003");
+
+    await expect(line).resolves.toBe("/exit");
+  });
+});
+
+describe("permission dialog readability", () => {
+  const presentations: TerminalChatPresentation[] = [];
+  afterEach(async () => {
+    await Promise.all(presentations.splice(0).map((presentation) => presentation.close()));
+  });
+
+  const painted = () => new Promise((resolve) => setTimeout(resolve, 25));
+
+  function writeFileRequest(factory: ChatEventFactory, content: string) {
+    return factory.create({
+      type: "permission.requested",
+      sessionId: sessionId("session-ui"),
+      runId: runId("run-ui"),
+      payload: {
+        request: {
+          requestId: "permission-write",
+          action: {
+            kind: "tool",
+            toolName: "write_file",
+            risk: "workspace-write",
+            requiredPermissions: ["workspace.write"],
+            input: { path: "src/generated.ts", content },
+          },
+          context: {
+            runId: "run-ui",
+            callId: "call-ui",
+            sessionId: "session-ui",
+            workspaceId: "C:/workspace/pilot",
+            applicationId: "pilot-cli",
+          },
+          policyDecision: {
+            effect: "ask",
+            reason: "Workspace writes require approval",
+            actionFingerprint: `sha256:${"a".repeat(64)}`,
+            evaluatedRuleIds: ["builtin.workspace-write.ask"],
+          },
+          availableScopes: ["once", "session"],
+        },
+      },
+    });
+  }
+
+  // Writing a real file used to render its entire content inside the prompt, pushing the question
+  // and the choices off a 24-row terminal.
+  it("keeps the question and the choices visible when writing a large file", async () => {
+    const terminal = new FakeTerminal(80, 24);
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities: { ...capabilities, columns: 80, rows: 24 },
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-29T12:00:00.000Z") });
+    presentation.readLine();
+    presentation.render(writeFileRequest(factory, "const generated = true;\n".repeat(500)));
+    await painted();
+
+    const frame = terminal.output.split("\u001b[?2026h").at(-1) ?? "";
+    expect(frame).toContain("Permission required");
+    expect(frame).toContain("src/generated.ts");
+    expect(frame).toContain("500 lines");
+    expect(frame).toContain("Allow once");
+    expect(frame).toContain("Deny");
+    expect(frame).toContain("Press d to review the full content");
+    // The payload itself never reaches the prompt.
+    expect(frame).not.toContain("const generated = true;");
+  });
+
+  it("shows the content on demand and returns to the choices", async () => {
+    const terminal = new FakeTerminal(80, 24);
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities: { ...capabilities, columns: 80, rows: 24 },
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-29T12:00:00.000Z") });
+    const response = presentation.readLine();
+    presentation.render(writeFileRequest(factory, "alpha\nbeta\ngamma\n"));
+    await painted();
+
+    terminal.input("d");
+    await painted();
+    expect(terminal.output).toContain("alpha");
+    expect(terminal.output).toContain("Content for src/generated.ts");
+
+    terminal.input("\u001b");
+    await painted();
+    terminal.input("\r");
+    await expect(response).resolves.toBe("allow once");
+  });
+
+  it("spells out what each broader scope grants", async () => {
+    const terminal = new FakeTerminal();
+    const presentation = new TerminalChatPresentation({
+      terminal,
+      capabilities,
+      workspacePath: "C:/workspace/pilot",
+    });
+    presentations.push(presentation);
+    const factory = new ChatEventFactory({ now: () => new Date("2026-07-29T12:00:00.000Z") });
+    presentation.readLine();
+    presentation.render(writeFileRequest(factory, "x"));
+    await painted();
+
+    terminal.input("\u001b[B");
+    terminal.input("\u001b[B");
+    terminal.input("\r");
+    await painted();
+
+    expect(terminal.output).toContain("This same action, for the rest of this session");
+    expect(terminal.output).not.toContain("Broader approval permitted by policy");
+  });
+});

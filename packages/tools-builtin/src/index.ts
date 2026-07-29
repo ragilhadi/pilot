@@ -246,3 +246,17 @@ export {
   type GitStatusOutput,
   type GitTools,
 } from "./git-tools.js";
+export {
+  collectDiagnostics,
+  describeDiagnostics,
+  DiagnosticsFieldSchema,
+  DiagnosticsReportSchema,
+  type DiagnosticsCollectorOptions,
+} from "./diagnostics-reporting.js";
+export {
+  createDiagnosticsTool,
+  DiagnosticsInputSchema,
+  DiagnosticsOutputSchema,
+  type DiagnosticsInput,
+  type DiagnosticsOutput,
+} from "./diagnostics-tool.js";

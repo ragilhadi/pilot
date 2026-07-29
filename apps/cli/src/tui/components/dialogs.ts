@@ -63,6 +63,80 @@ export class SelectionDialog implements Component {
   }
 }
 
+/**
+ * A yes/no gate for an action that cannot be undone from inside the session.
+ *
+ * Cancel is selected first so that a stray Enter never confirms, and Esc always cancels.
+ */
+export class ConfirmDialog implements Component {
+  readonly #list: SelectList;
+  readonly #title: string;
+  readonly #lines: readonly string[];
+  readonly #theme: PilotTheme;
+  onConfirm?: () => void;
+  onCancel?: () => void;
+
+  constructor(
+    title: string,
+    lines: readonly string[],
+    theme: PilotTheme,
+    labels: { readonly confirm: string; readonly cancel: string },
+  ) {
+    this.#title = title;
+    this.#lines = lines;
+    this.#theme = theme;
+    this.#list = new SelectList(
+      [
+        { value: "cancel", label: labels.cancel, description: "Stay in this session" },
+        { value: "confirm", label: labels.confirm, description: "This ends the session" },
+      ],
+      4,
+      theme.select,
+    );
+    this.#list.onSelect = (item) => {
+      if (item.value === "confirm") this.onConfirm?.();
+      else this.onCancel?.();
+    };
+    this.#list.onCancel = () => this.onCancel?.();
+  }
+
+  invalidate(): void {
+    this.#list.invalidate();
+  }
+
+  handleInput(data: string): void {
+    if (matchesKey(data, Key.escape)) {
+      this.onCancel?.();
+      return;
+    }
+    // A bare y/n is faster than arrowing to a choice, and matches what the hint offers.
+    if (data === "y" || data === "Y") {
+      this.onConfirm?.();
+      return;
+    }
+    if (data === "n" || data === "N") {
+      this.onCancel?.();
+      return;
+    }
+    this.#list.handleInput(data);
+  }
+
+  render(width: number): string[] {
+    const innerWidth = Math.max(1, width - 4);
+    return frameOverlay(
+      [
+        this.#theme.warning(this.#title),
+        ...this.#lines.flatMap((line) => wrapPlain(line, innerWidth, 0)),
+        "",
+        ...this.#list.render(innerWidth),
+        "",
+        this.#theme.muted("y confirm  n/Esc cancel  Enter select"),
+      ],
+      width,
+    );
+  }
+}
+
 export class DismissableDialog implements Component {
   readonly #title: string;
   readonly #lines: readonly string[];

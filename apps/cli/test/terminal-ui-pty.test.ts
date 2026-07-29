@@ -12,6 +12,7 @@ describe("packaged terminal UI in a pseudo-terminal", () => {
     const dataDirectory = await mkdtemp(path.join(tmpdir(), "pilot-pty-"));
     let output = "";
     let exitSent = false;
+    let exitConfirmed = false;
     try {
       const terminal = spawn(process.execPath, [cliEntry, "chat", "--ui", "tui"], {
         name: "xterm-256color",
@@ -31,6 +32,12 @@ describe("packaged terminal UI in a pseudo-terminal", () => {
         if (output.includes("ready") && !exitSent) {
           exitSent = true;
           terminal.write("/exit\r");
+          return;
+        }
+        // Exiting is confirmed now, so the session ends only after answering the prompt.
+        if (exitSent && !exitConfirmed && output.includes("Are you sure you want to exit?")) {
+          exitConfirmed = true;
+          terminal.write("y");
         }
       });
       const exit = await Promise.race([
