@@ -306,9 +306,19 @@ function isPipedToInterpreter(command: string): boolean {
   );
 }
 
-/** `-f`, `-fd`, `--force`: a short flag cluster containing f, or the long form. */
+/**
+ * `-f`, `-fd`, `--force`: a short flag cluster containing f, or the long form.
+ *
+ * Deliberately not `/^-[a-z]*f[a-z]*$/`: two unbounded quantifiers over the same character class
+ * make matching quadratic in the token length, and these tokens come straight from the model — an
+ * argument may be 32 KB, so `-ffff…` with no trailing match is a polynomial-ReDoS vector. A single
+ * anchored quantifier plus an `includes` is linear and says the same thing.
+ */
 function isForceFlag(token: string): boolean {
-  return token === "--force" || /^-[a-z]*f[a-z]*$/u.test(token);
+  if (token === "--force") return true;
+  if (!token.startsWith("-") || token.startsWith("--")) return false;
+  const flags = token.slice(1);
+  return flags.includes("f") && /^[a-z]+$/u.test(flags);
 }
 
 function normalizeExecutable(input: string): string {

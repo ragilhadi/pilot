@@ -65,3 +65,38 @@ describe("classifyCommandRisk", () => {
     expect(Object.isFrozen(result.reasons)).toBe(true);
   });
 });
+
+describe("force-flag matching", () => {
+  it.each([
+    ["-f", true],
+    ["-fd", true],
+    ["-df", true],
+    ["--force", true],
+    ["-n", false],
+    ["--dry-run", false],
+    ["foo.txt", false],
+    ["-f1", false],
+    ["", false],
+  ])("treats %j as force=%s", (token, expected) => {
+    const result = classifyCommandRisk({
+      mode: "direct",
+      executable: "git",
+      args: ["clean", token],
+    });
+    expect(result.risk === "destructive").toBe(expected);
+  });
+
+  // Command tokens come from the model and may be 32 KB. The previous pattern had two unbounded
+  // quantifiers over the same class, so a long run of "f" with no match backtracked quadratically.
+  it("stays linear on a long non-matching flag cluster", () => {
+    const started = performance.now();
+    for (const length of [10_000, 20_000, 30_000]) {
+      classifyCommandRisk({
+        mode: "direct",
+        executable: "git",
+        args: ["clean", `-${"f".repeat(length)}1`],
+      });
+    }
+    expect(performance.now() - started).toBeLessThan(1_000);
+  });
+});
