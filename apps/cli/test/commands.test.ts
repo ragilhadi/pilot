@@ -1,9 +1,9 @@
 import { InstructionDiscovery, ModelRegistry, ToolRegistry } from "@pilotrun/agent-runtime";
 import {
   defineTool,
-  messageId,
   type ModelCapabilities,
   ModelContractValidationError,
+  messageId,
   parseAgentMessage,
   resolveConfiguration,
   runId,
@@ -16,7 +16,6 @@ import {
   SqliteSessionAdministration,
 } from "@pilotrun/persistence-sqlite";
 import type { Fetch } from "@pilotrun/provider-openai-compatible";
-import type { GitCommandRunner } from "@pilotrun/tools-builtin";
 import {
   delayStep,
   eventStep,
@@ -24,15 +23,16 @@ import {
   textResponseScript,
   toolCallScript,
 } from "@pilotrun/testkit";
+import type { GitCommandRunner } from "@pilotrun/tools-builtin";
 import { describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import {
   compatibleModelsEnvironmentVariable,
   createModelCatalog,
   defaultCliModelKey,
+  type LineReader,
   ollamaBaseUrlEnvironmentVariable,
   runCli,
-  type LineReader,
   type TextWriter,
 } from "../src/index.js";
 import { approvalAwareLines } from "./approval-aware-lines.js";
@@ -1157,11 +1157,11 @@ describe("pilot chat", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { schemaVersion: number; sequence: number; type: string });
-    // The fake model reports no usage, so Pilot publishes its own estimate as the first
-    // model.stream event rather than leaving the context figure blank.
+    // Occupancy is published once per cycle, before the model call, and independently of whether
+    // the provider reports usage — it measures the payload about to be sent, not what was billed.
     expect(events.map(({ type }) => type)).toEqual([
       "chat.started",
-      "model.stream",
+      "context.occupancy",
       "model.stream",
       "model.stream",
       "model.stream",
@@ -1170,8 +1170,14 @@ describe("pilot chat", () => {
     ]);
     expect(events.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(events[1]).toMatchObject({
-      type: "model.stream",
-      payload: { event: { type: "usage.updated", usage: { source: "estimated" } } },
+      type: "context.occupancy",
+      payload: {
+        occupancy: {
+          confidence: "heuristic",
+          method: "script-heuristic",
+          totalTokens: expect.any(Number),
+        },
+      },
     });
     expect(events.every(({ schemaVersion }) => schemaVersion === 1)).toBe(true);
     expect(stderr.text()).toBe("");
@@ -1355,6 +1361,7 @@ describe("CLI Ollama Cloud priority", () => {
     expect(requestUrl).toBe("http://127.0.0.1:22434/v1/chat/completions");
   });
 });
+
 import { createHash } from "node:crypto";
 import { realpath as realpathCallback } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";

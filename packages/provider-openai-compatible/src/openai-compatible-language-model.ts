@@ -8,13 +8,14 @@ import {
   type ModelFailureKind,
   type ModelRequest,
   type ModelStreamEvent,
+  type ProviderConfiguration,
   parseModelCapabilities,
   parseModelKey,
   parseModelRequest,
   parseModelStreamEvent,
   parseProviderConfiguration,
   parseToolCallArguments,
-  type ProviderConfiguration,
+  type RequestPayloadDescription,
 } from "@pilotrun/core";
 import * as z from "zod";
 import {
@@ -22,7 +23,7 @@ import {
   processEnvironmentReader,
   resolveBearerToken,
 } from "./credentials.js";
-import { createChatCompletionsRequest } from "./request.js";
+import { createChatCompletionsRequest, describeChatCompletionsPayload } from "./request.js";
 import { parseServerSentEvents, readableStreamChunks } from "./sse.js";
 
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -141,6 +142,10 @@ export class OpenAICompatibleLanguageModel implements LanguageModel {
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#readEnvironment = options.readEnvironment ?? processEnvironmentReader;
     this.#now = options.now ?? Date.now;
+  }
+
+  describeRequestPayload(requestInput: ModelRequest): RequestPayloadDescription {
+    return describeChatCompletionsPayload(this.modelId, parseModelRequest(requestInput));
   }
 
   async *stream(

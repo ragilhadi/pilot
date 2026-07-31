@@ -1,6 +1,6 @@
-import { parseAgentMessage, parseModelRequest } from "@pilotrun/core";
+import { chatTemplateOverheads, parseAgentMessage, parseModelRequest } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
-import { createChatCompletionsRequest } from "../src/index.js";
+import { createChatCompletionsRequest, describeChatCompletionsPayload } from "../src/index.js";
 
 const common = {
   schemaVersion: 1,
@@ -129,5 +129,156 @@ describe("createChatCompletionsRequest", () => {
       type: "function",
       function: { name: "read_file" },
     });
+  });
+});
+
+describe("describeChatCompletionsPayload", () => {
+  const readFileTool = {
+    name: "read_file",
+    description: "Read a file from the workspace",
+    inputSchema: {
+      type: "object",
+      properties: { path: { type: "string", description: "Path to read" } },
+      required: ["path"],
+    },
+  } as const;
+
+  const conversation = [
+    parseAgentMessage({
+      ...common,
+      id: "system-1",
+      role: "system",
+      parts: [{ type: "text", text: "Be precise" }],
+      provenance: { kind: "system", source: "builtin" },
+    }),
+    parseAgentMessage({
+      ...common,
+      id: "user-1",
+      role: "user",
+      parts: [{ type: "text", text: "read the readme" }],
+      provenance: { kind: "user", channel: "cli" },
+    }),
+    parseAgentMessage({
+      ...common,
+      id: "assistant-1",
+      role: "assistant",
+      parts: [
+        { type: "text", text: "reading" },
+        {
+          type: "tool-call",
+          callId: "call-1",
+          toolName: "read_file",
+          input: { path: "README.md" },
+        },
+      ],
+      provenance: { kind: "model", providerId: "compatible", modelId: "example" },
+    }),
+    parseAgentMessage({
+      ...common,
+      id: "tool-1",
+      role: "tool",
+      parts: [
+        {
+          type: "tool-result",
+          callId: "call-1",
+          toolName: "read_file",
+          output: { content: "hello" },
+          isError: false,
+        },
+      ],
+      provenance: { kind: "tool", callId: "call-1", toolName: "read_file" },
+    }),
+  ];
+
+  /**
+   * The structural guard behind the whole change: every scrap of text the request body carries has
+   * to turn up in some segment. If a field is added to the body and not to the description, the
+   * accounting silently stops seeing it — which is exactly how the tool schemas went missing.
+   */
+  it("accounts for every piece of text the request body carries", () => {
+    const request = parseModelRequest({
+      messages: conversation,
+      tools: [readFileTool],
+      responseFormat: {
+        type: "json-schema",
+        name: "answer",
+        schema: { type: "object" },
+        strict: true,
+      },
+    });
+    const body = createChatCompletionsRequest("example", request);
+    const described = describeChatCompletionsPayload("example", request)
+      .segments.map((segment) => segment.text)
+      .join("\n");
+
+    for (const fragment of [
+      "Be precise",
+      "read the readme",
+      "reading",
+      "README.md",
+      "hello",
+      "read_file",
+      "Read a file from the workspace",
+      "Path to read",
+      "json_schema",
+    ]) {
+      expect(described).toContain(fragment);
+    }
+    // The tool schemas are the specific thing the old message-only accounting never saw.
+    expect(JSON.stringify(body.tools)).toBeTruthy();
+    expect(described).toContain(JSON.stringify(body.tools));
+  });
+
+  it("puts tool definitions, tool results, and images in their own segments", () => {
+    const request = parseModelRequest({ messages: conversation, tools: [readFileTool] });
+    const kinds = describeChatCompletionsPayload("example", request).segments.map(
+      (segment) => segment.kind,
+    );
+    expect(kinds).toEqual(["tool-definitions", "system", "message", "message", "tool-result"]);
+  });
+
+  it("emits no tool-definitions segment when the request carries no tools", () => {
+    const request = parseModelRequest({ messages: conversation, tools: [] });
+    const kinds = describeChatCompletionsPayload("example", request).segments.map(
+      (segment) => segment.kind,
+    );
+    expect(kinds).not.toContain("tool-definitions");
+  });
+
+  it("charges template framing per message and once for the generation prompt", () => {
+    const request = parseModelRequest({ messages: conversation, tools: [] });
+    const description = describeChatCompletionsPayload("example", request);
+    expect(description.generationPromptTokens).toBe(chatTemplateOverheads.generationPrompt);
+    // The assistant turn carries one tool call, so it costs an extra envelope beyond its role
+    // delimiters; the tool result carries the matching `tool_call_id`.
+    expect(description.segments.map((segment) => segment.overheadTokens)).toEqual([
+      chatTemplateOverheads.perMessage,
+      chatTemplateOverheads.perMessage,
+      chatTemplateOverheads.perMessage + chatTemplateOverheads.perToolCall,
+      chatTemplateOverheads.perMessage + chatTemplateOverheads.perToolCall,
+    ]);
+  });
+
+  it("separates an image from the text it accompanies", () => {
+    const request = parseModelRequest({
+      messages: [
+        parseAgentMessage({
+          ...common,
+          id: "user-image",
+          role: "user",
+          parts: [
+            { type: "text", text: "what is this" },
+            { type: "image", mediaType: "image/png", source: { kind: "base64", data: "YWJj" } },
+          ],
+          provenance: { kind: "user", channel: "cli" },
+        }),
+      ],
+      tools: [],
+    });
+    const segments = describeChatCompletionsPayload("example", request).segments;
+    expect(segments.map((segment) => segment.kind)).toEqual(["message", "image"]);
+    // The base64 payload is not counted as text; the image carries a flat cost instead.
+    expect(segments[1]?.text).toBe("");
+    expect(segments[1]?.overheadTokens).toBe(chatTemplateOverheads.perImage);
   });
 });

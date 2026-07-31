@@ -1,25 +1,34 @@
 import {
-  AgentMessageSchema,
-  messageId,
-  parseModelRequest,
   type AgentMessage,
+  AgentMessageSchema,
+  describesRequestPayload,
   type JsonObject,
+  type LanguageModel,
   type ModelDescriptor,
   type ModelRequest,
+  messageId,
+  parseModelRequest,
+  type RequestPayloadDescription,
   type RunId,
   type SessionId,
+  type TokenCounter,
 } from "@pilotrun/core";
 import {
-  ContextEngine,
-  ContextEngineError,
-  Utf8HeuristicTokenEstimator,
   type CollectedContextCandidate,
   type ContextCandidate,
+  ContextEngine,
+  ContextEngineError,
   type ContextExclusionReason,
   type ContextSelection,
   type ContextSource,
   type ContextTokenEstimator,
+  Utf8HeuristicTokenEstimator,
 } from "./context-engine.js";
+import {
+  describeGenericRequestPayload,
+  RequestTokenAccountant,
+  ScriptAwareHeuristicCounter,
+} from "./token-accounting.js";
 
 export interface PromptCompositionInput {
   readonly selection: ContextSelection;
@@ -28,6 +37,12 @@ export interface PromptCompositionInput {
   readonly runId: RunId;
   readonly cycle: number;
   readonly composedAt: string;
+  /**
+   * Tokens the request's tool definitions occupy. Reported separately from `composedTokens` because
+   * they are not context candidates and were never subject to selection — but they are re-sent on
+   * every request, so a breakdown that omits them understates the window by thousands of tokens.
+   */
+  readonly toolDefinitionTokens?: number;
 }
 
 export interface ContextSnapshotEntry {
@@ -60,6 +75,8 @@ export interface PromptCompositionSnapshot {
   readonly selectedTokens: number;
   readonly remainingTokens: number;
   readonly composedTokens: number;
+  /** Tokens occupied by the tool schemas sent alongside the composed messages. */
+  readonly toolDefinitionTokens: number;
   readonly remainingModelTokens: number;
   readonly sourceUsage: Readonly<Record<string, number>>;
   readonly selected: readonly ContextSnapshotEntry[];
@@ -74,6 +91,8 @@ export interface PromptComposition {
 export interface ModelRequestContextPreparationInput {
   readonly request: ModelRequest;
   readonly descriptor: ModelDescriptor;
+  /** Resolved model, used to price the tool definitions in the adapter's own wire shape. */
+  readonly model?: LanguageModel;
   readonly runId: RunId;
   readonly cycle: number;
   readonly signal: AbortSignal;
@@ -88,6 +107,8 @@ export interface ConversationContextPreparerOptions {
   readonly reservedOutputTokens: number;
   readonly mandatoryRecentMessages?: number;
   readonly tokenEstimator?: ContextTokenEstimator;
+  /** Counter behind the tool-definition reservation; defaults to the script-aware heuristic. */
+  readonly tokenCounter?: TokenCounter;
   readonly now?: () => string;
   readonly additionalSources?: readonly ContextSource[];
   readonly targetPaths?: readonly string[];
@@ -160,6 +181,7 @@ export class PromptComposer {
         selectedTokens: input.selection.selectedTokens,
         remainingTokens: input.selection.remainingTokens,
         composedTokens,
+        toolDefinitionTokens: input.toolDefinitionTokens ?? 0,
         remainingModelTokens: input.selection.maximumTokens - composedTokens,
         sourceUsage: input.selection.sourceUsage,
         selected: Object.freeze(selectedEntries),
@@ -175,6 +197,7 @@ export class ConversationModelRequestContextPreparer implements ModelRequestCont
   readonly #reservedOutputTokens: number;
   readonly #mandatoryRecentMessages: number;
   readonly #tokenEstimator: ContextTokenEstimator;
+  readonly #accountant: RequestTokenAccountant;
   readonly #now: () => string;
   readonly #composer: PromptComposer;
   readonly #additionalSources: readonly ContextSource[];
@@ -195,6 +218,9 @@ export class ConversationModelRequestContextPreparer implements ModelRequestCont
     );
     this.#tokenEstimator = options.tokenEstimator ?? new Utf8HeuristicTokenEstimator();
     this.#composer = new PromptComposer({ tokenEstimator: this.#tokenEstimator });
+    this.#accountant = new RequestTokenAccountant(
+      options.tokenCounter ?? new ScriptAwareHeuristicCounter(),
+    );
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#additionalSources = Object.freeze([...(options.additionalSources ?? [])]);
     this.#targetPaths = Object.freeze([...(options.targetPaths ?? [])]);
@@ -240,9 +266,17 @@ export class ConversationModelRequestContextPreparer implements ModelRequestCont
           },
         })),
     } as const;
-    const toolReservation = this.#tokenEstimator.estimate(
-      JSON.stringify(input.request.tools),
-    ).tokens;
+    // Price the tools as the adapter will send them. Serializing the domain definitions instead
+    // charges for `outputSchema`, which never crosses the wire, and misses the `{type, function}`
+    // envelope that does.
+    const toolReservation =
+      input.request.tools.length === 0
+        ? 0
+        : this.#accountant.measure(
+            describesRequestPayload(input.model)
+              ? toolDefinitionsOnly(input.model.describeRequestPayload(input.request))
+              : toolDefinitionsOnly(describeGenericRequestPayload(input.request)),
+          ).totalTokens;
     const selection = await new ContextEngine([...this.#additionalSources, source], {
       tokenEstimator: this.#tokenEstimator,
     }).prepare(
@@ -277,6 +311,7 @@ export class ConversationModelRequestContextPreparer implements ModelRequestCont
       runId: input.runId,
       cycle: input.cycle,
       composedAt: this.#now(),
+      toolDefinitionTokens: toolReservation,
     });
   }
 }
@@ -571,4 +606,17 @@ function positiveInteger(value: number, label: string): number {
     throw new ContextEngineError("PILOT_CONTEXT_INVALID", `${label} must be positive`);
   }
   return value;
+}
+
+/**
+ * Narrow a payload description to its tool definitions.
+ *
+ * The context budget reserves room for the tools before selecting candidates, so it needs their cost
+ * alone — not the cost of the conversation that is about to be selected against it.
+ */
+function toolDefinitionsOnly(description: RequestPayloadDescription): RequestPayloadDescription {
+  return Object.freeze({
+    segments: description.segments.filter((segment) => segment.kind === "tool-definitions"),
+    generationPromptTokens: 0,
+  });
 }

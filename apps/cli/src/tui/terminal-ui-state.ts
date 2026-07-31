@@ -1,10 +1,15 @@
 import type {
+  ContextOccupancy,
+  PromptCompositionSnapshot,
+  RunState,
+} from "@pilotrun/agent-runtime";
+import type {
   ClarificationRequest,
   JsonValue,
   PermissionApprovalRequest,
   SafeErrorSnapshot,
+  TokenCountConfidence,
 } from "@pilotrun/core";
-import type { PromptCompositionSnapshot, RunState } from "@pilotrun/agent-runtime";
 import type { ChatEvent } from "../chat-events.js";
 
 export type TerminalUiPhase =
@@ -96,15 +101,22 @@ export type TranscriptBlock =
 
 export interface TerminalUsageState {
   /**
-   * Prompt tokens for the most recent model request — i.e. how much of the context window the
-   * conversation currently occupies. This is a level, not a running total: every request re-sends
-   * the whole conversation, so summing it across turns would multiply the real figure.
+   * How much of the context window the next request will occupy, measured locally over the payload
+   * the provider is about to receive. A level, not a running total: every request re-sends the whole
+   * conversation, so summing it across turns would multiply the real figure.
+   *
+   * Deliberately not the provider's reported prompt tokens. On a KV-cached runner such as Ollama
+   * that figure counts only the tokens actually evaluated, so it falls as the conversation grows.
    */
+  readonly contextTokens?: number;
+  /** How far the occupancy figure can be trusted, so the display never overstates its precision. */
+  readonly contextConfidence?: TokenCountConfidence;
+  /** Prompt tokens as billed by the provider. Kept for cost, never used as occupancy. */
   readonly inputTokens?: number;
   /** Completion tokens generated during the current turn, reset when a new turn is submitted. */
   readonly outputTokens?: number;
   readonly estimatedCostUsd?: number;
-  /** The model's context window, when known, so the input figure can be shown as a fraction. */
+  /** The effective context window, so occupancy can be shown as a fraction. */
   readonly contextWindowTokens?: number;
   /** True when the numbers are Pilot's estimate rather than the provider's own accounting. */
   readonly estimated?: boolean;
@@ -126,6 +138,8 @@ export interface TerminalUiState {
   readonly currentTurnBlockStart: number | undefined;
   readonly lastTurnSummary: TurnSummary | undefined;
   readonly context?: PromptCompositionSnapshot;
+  /** Latest per-segment context breakdown, for the `/context` panel. */
+  readonly occupancy?: ContextOccupancy;
   readonly error?: SafeErrorSnapshot;
 }
 
@@ -216,6 +230,19 @@ export function reduceTerminalUi(
         ...sequencedState,
         modelKey: event.payload.modelKey,
         usage: withContextWindow(sequencedState.usage, event.payload.contextWindowTokens),
+      };
+    case "context.occupancy":
+      return {
+        ...sequencedState,
+        usage: {
+          ...sequencedState.usage,
+          contextTokens: event.payload.occupancy.totalTokens,
+          contextConfidence: event.payload.occupancy.confidence,
+          ...(event.payload.contextWindowTokens === undefined
+            ? {}
+            : { contextWindowTokens: event.payload.contextWindowTokens }),
+        },
+        occupancy: event.payload.occupancy,
       };
     case "chat.help":
       return appendNotice(
