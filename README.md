@@ -88,10 +88,20 @@ can also be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON` (a JSON array o
 `{ provider, modelId, displayName, capabilities }` entries; credentials must be environment-variable
 references, never raw keys).
 
-In an interactive terminal, `chat` uses a full-screen TUI automatically (multiline editor,
-history, `/` and `@` completion, streaming Markdown, permission prompts). Force a mode
-explicitly with `--ui tui`, `--ui plain`, `--screen-reader`, or `--json`. Sessions and tool
-activity are stored in SQLite under `PILOT_DATA_DIR` (default `~/.pilot`).
+In an interactive terminal, `chat` renders inline (multiline editor, history, `/` and `@`
+completion, streaming Markdown, permission prompts). Finished output — your message, each settled
+tool call, each completed reply — is written to the terminal's own scrollback and never redrawn, so
+the scroll wheel, `Shift+PgUp`, and tmux copy-mode reach the whole session *and* whatever was on
+screen before Pilot started. Only a small live region at the bottom is repainted.
+
+Because committed output belongs to the terminal, it keeps the width it was written at: resizing
+does not reflow earlier output, the same way it does not reflow `git log`. Reflowing it would mean
+rewriting it, and rewriting it is what clears a scrollback.
+
+Force a mode explicitly with `--ui tui` (inline, the default), `--ui fullscreen` (the whole
+transcript stays in the live buffer, which clears the screen to redraw on resize), `--ui plain`,
+`--screen-reader`, or `--json`. Sessions and tool activity are stored in SQLite under
+`PILOT_DATA_DIR` (default `~/.pilot`).
 
 Reference a file as context by typing `@` followed by its path (`@src/index.ts`, or
 `@"a file with spaces.ts"` for paths with spaces); the picker lists workspace files and folders as

@@ -31,6 +31,17 @@ export interface ActivitySnapshot {
   readonly elapsedMs: number;
 }
 
+/**
+ * How the transcript is drawn.
+ *
+ * - `inline` renders only the blocks that are still moving. Finished blocks have already been
+ *   written to the terminal's scrollback, and the banner was printed once at startup, so redrawing
+ *   either would duplicate output the terminal already owns.
+ * - `fullscreen` renders the banner and the whole transcript every frame, which is the only way to
+ *   keep an app-like pane consistent — at the cost of the scrollback it has to clear to do it.
+ */
+export type TranscriptRenderMode = "inline" | "fullscreen";
+
 export class PilotScreen implements Component {
   readonly #state: () => TerminalUiState;
   readonly #theme: PilotTheme;
@@ -38,6 +49,8 @@ export class PilotScreen implements Component {
   readonly #workspacePath: string;
   readonly #repository: RepositoryDisplayState | undefined;
   readonly #activity: () => ActivitySnapshot | undefined;
+  readonly #mode: TranscriptRenderMode;
+  readonly #maxRows: () => number;
   readonly #blockCache = new Map<
     string,
     { readonly block: TranscriptBlock; readonly lines: readonly string[] }
@@ -50,6 +63,8 @@ export class PilotScreen implements Component {
     workspacePath: string,
     repository?: RepositoryDisplayState,
     activity?: () => ActivitySnapshot | undefined,
+    mode: TranscriptRenderMode = "fullscreen",
+    maxRows?: () => number,
   ) {
     this.#state = state;
     this.#theme = theme;
@@ -57,13 +72,21 @@ export class PilotScreen implements Component {
     this.#workspacePath = workspacePath;
     this.#repository = repository;
     this.#activity = activity ?? (() => undefined);
+    this.#mode = mode;
+    this.#maxRows = maxRows ?? (() => Number.POSITIVE_INFINITY);
   }
 
   invalidate(): void {
     this.#blockCache.clear();
   }
 
-  render(width: number): string[] {
+  /**
+   * The banner, as a standalone frame.
+   *
+   * In inline mode it is committed to scrollback once at startup instead of being line 0 of every
+   * frame, so it scrolls away like any other output rather than being redrawn forever.
+   */
+  renderBanner(width: number): string[] {
     const state = this.#state();
     const workspace = path.basename(this.#workspacePath) || this.#workspacePath;
     const brand = this.#theme.strong(this.#capabilities.unicode ? "◆ PILOT" : "PILOT");
@@ -78,9 +101,25 @@ export class PilotScreen implements Component {
       `${brand}${session}  ${workspace}${branch}  ${this.#theme.muted(model)}  ${this.#theme.warning("Manual")}`,
       width,
     );
-    const lines = [header, this.#theme.muted("─".repeat(Math.max(1, width))), ""];
+    return [header, this.#theme.muted("─".repeat(Math.max(1, width))), ""];
+  }
+
+  /** Render one transcript block exactly as this screen would, for committing it to scrollback. */
+  renderBlockForCommit(block: TranscriptBlock, width: number): readonly string[] {
+    const state = this.#state();
+    return [
+      ...this.#renderBlockCached(block, width, state.showToolDetails, state.showThinking),
+      "",
+    ];
+  }
+
+  render(width: number): string[] {
+    const state = this.#state();
+    const inline = this.#mode === "inline";
+    const lines = inline ? [] : this.renderBanner(width);
+    const blocks = inline ? state.blocks.slice(state.committedBlockCount) : state.blocks;
     let previous: TranscriptBlock | undefined;
-    for (const block of state.blocks) {
+    for (const block of blocks) {
       if (block.kind === "user" && previous !== undefined) {
         const divider = this.#capabilities.unicode ? "┄" : "-";
         lines.push(this.#theme.muted(divider.repeat(Math.min(Math.max(1, width), 32))), "");
@@ -97,7 +136,7 @@ export class PilotScreen implements Component {
         if (!activeIds.has(key.split("\0", 1)[0] ?? "")) this.#blockCache.delete(key);
       }
     }
-    if (state.blocks.length === 0) {
+    if (!inline && state.blocks.length === 0) {
       lines.push(
         this.#theme.muted("Ask Pilot to inspect, explain, or change this repository."),
         "",
@@ -113,7 +152,14 @@ export class PilotScreen implements Component {
       );
       if (indicator !== undefined) lines.push(this.#theme.accent(indicator), "");
     }
-    return lines;
+    if (!inline) return lines;
+
+    // The live region must never grow past the screen. If it did, its top would scroll into the
+    // terminal's scrollback while still uncommitted — and committing the block later would write
+    // those rows a second time. Showing the tail keeps the newest output visible, and the block is
+    // committed in full the moment it stops changing.
+    const maxRows = this.#maxRows();
+    return lines.length > maxRows ? lines.slice(lines.length - maxRows) : lines;
   }
 
   #renderBlockCached(

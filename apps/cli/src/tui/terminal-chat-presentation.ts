@@ -19,8 +19,13 @@ import {
   PilotScreen,
   type RepositoryDisplayState,
   summarizeToolCall,
+  type TranscriptRenderMode,
 } from "./components/screen.js";
 import { formatDuration } from "./render-helpers.js";
+import { PiTuiLiveRegion } from "./live-region.js";
+import { ResizeInterceptingTerminal } from "./resize-interceptor.js";
+import { liveRegionRowBudget, ScrollbackWriter } from "./scrollback.js";
+import { committableBlockCount } from "./transcript-committer.js";
 import { WorkspaceFileAutocompleteProvider } from "./workspace-file-autocomplete.js";
 import {
   applyPilotTheme,
@@ -52,6 +57,12 @@ export interface TerminalChatPresentationOptions {
   readonly now?: () => number;
   /** Frame interval for the activity animation, in milliseconds. */
   readonly activityIntervalMs?: number;
+  /**
+   * `inline` (default) commits finished output to the terminal's scrollback and redraws only a
+   * bounded live region, so native scrolling reaches the session transcript and whatever was on
+   * screen before Pilot started. `fullscreen` keeps the whole transcript in the live buffer.
+   */
+  readonly renderMode?: TranscriptRenderMode;
 }
 
 /** Rows reserved below the permission dialog: the footer's two lines plus one composer line. */
@@ -72,6 +83,9 @@ export interface SessionDisplayState {
 export class TerminalChatPresentation implements InteractiveChatPresentation {
   readonly #terminal: Terminal;
   readonly #tui: TUI;
+  readonly #liveRegion: PiTuiLiveRegion;
+  readonly #scrollback: ScrollbackWriter;
+  readonly #renderMode: TranscriptRenderMode;
   readonly #editor: Editor;
   readonly #screen: PilotScreen;
   readonly #footer: PilotFooter;
@@ -108,7 +122,16 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     this.#workspacePath = options.workspacePath;
     this.#now = options.now ?? (() => performance.now());
     this.#activityIntervalMs = options.activityIntervalMs ?? 120;
-    this.#tui = new TUI(options.terminal);
+    this.#renderMode = options.renderMode ?? "inline";
+    // In inline mode the resize has to be absorbed before the renderer reacts to it, or the
+    // renderer clears the screen — and the scrollback — to redraw at the new width.
+    this.#tui = new TUI(
+      this.#renderMode === "inline"
+        ? new ResizeInterceptingTerminal(options.terminal, () => this.#handleResize())
+        : options.terminal,
+    );
+    this.#liveRegion = new PiTuiLiveRegion(this.#tui);
+    this.#scrollback = new ScrollbackWriter(options.terminal, this.#liveRegion);
     this.#screen = new PilotScreen(
       () => this.#state,
       this.#theme,
@@ -116,6 +139,8 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#workspacePath,
       options.repository,
       () => this.#activitySnapshot(),
+      this.#renderMode,
+      () => this.#transcriptRowBudget(),
     );
     this.#editor = new Editor(this.#tui, this.#theme.editor, {
       paddingX: options.capabilities.columns >= 80 ? 1 : 0,
@@ -146,6 +171,75 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     this.#tui.addInputListener((data) => this.#handleGlobalInput(data));
     this.#terminal.setTitle(`Pilot — ${path.basename(this.#workspacePath)}`);
     this.#tui.start();
+    if (this.#renderMode === "inline") {
+      // The banner goes to scrollback once, directly below whatever the shell had already printed.
+      // Nothing is cleared, so the user's history stays exactly where it was.
+      this.#scrollback.commit(this.#screen.renderBanner(this.#terminal.columns));
+    }
+  }
+
+  /**
+   * Hand every block that can no longer change to the terminal's scrollback.
+   *
+   * Runs after each state change. Blocks are committed in transcript order and only when every
+   * earlier block is also final, because scrollback is append-only — a still-streaming message holds
+   * back the ones drawn below it.
+   */
+  #commitFinishedBlocks(): void {
+    if (this.#renderMode !== "inline" || this.#closed) return;
+    const width = this.#terminal.columns;
+    const target = committableBlockCount(this.#state.blocks, this.#state.committedBlockCount);
+    if (target === this.#state.committedBlockCount) return;
+
+    const lines: string[] = [];
+    for (let index = this.#state.committedBlockCount; index < target; index += 1) {
+      const block = this.#state.blocks[index];
+      if (block === undefined) continue;
+      if (block.kind === "user" && index > 0) {
+        const divider = this.#capabilities.unicode ? "┄" : "-";
+        lines.push(this.#theme.muted(divider.repeat(Math.min(Math.max(1, width), 32))), "");
+      }
+      lines.push(...this.#screen.renderBlockForCommit(block, width));
+    }
+    this.#scrollback.setLiveRowCount(this.#drawnRowCount());
+    this.#scrollback.commit(lines);
+    this.#state = reduceTerminalUi(this.#state, { type: "ui.blocks-committed", count: target });
+  }
+
+  /**
+   * Redraw at the new size without clearing anything above the live region.
+   *
+   * Erase the rows the region occupied, then tell the renderer the new dimensions are already its
+   * own so its next frame takes the first-render path rather than the clearing one. Committed rows
+   * keep the width they were written at — reflowing them would mean rewriting them, and rewriting
+   * them is what destroys the scrollback.
+   */
+  #handleResize(): void {
+    if (this.#closed) return;
+    this.#scrollback.setLiveRowCount(this.#drawnRowCount());
+    this.#scrollback.eraseLiveRegion();
+    this.#liveRegion.absorbResize(this.#terminal.columns, this.#terminal.rows);
+  }
+
+  /**
+   * Rows the transcript part of the live region may use.
+   *
+   * The region's budget less the footer's two lines and a line for the composer, so the whole thing
+   * fits on screen and never scrolls.
+   */
+  #transcriptRowBudget(): number {
+    return Math.max(1, liveRegionRowBudget(this.#terminal.rows) - 3);
+  }
+
+  /**
+   * Rows the live region occupies on screen right now.
+   *
+   * Taken from what the renderer last drew, and capped at the region's row budget so an erase can
+   * never reach further up than one screen even if the renderer reports something unexpected.
+   */
+  #drawnRowCount(): number {
+    const drawn = this.#liveRegion.drawnRowCount() ?? 0;
+    return Math.min(liveRegionRowBudget(this.#terminal.rows), drawn);
   }
 
   render(event: ChatEvent): void {
@@ -169,6 +263,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       this.#showContextOverlay(event.payload.snapshot);
     }
     this.#syncActivity();
+    this.#commitFinishedBlocks();
     this.#tui.requestRender();
   }
 
@@ -305,7 +400,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       return { consume: true };
     }
     if (matchesKey(data, Key.ctrl("l"))) {
-      this.#tui.requestRender(true);
+      this.#liveRegion.redraw();
       return { consume: true };
     }
     if (matchesKey(data, Key.ctrl("o"))) {
@@ -315,7 +410,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     }
     if (matchesKey(data, Key.ctrl("t"))) {
       this.#state = reduceTerminalUi(this.#state, { type: "ui.toggle-thinking" });
-      this.#tui.requestRender(true);
+      this.#liveRegion.redraw();
       return { consume: true };
     }
     if (matchesKey(data, Key.ctrl("r"))) {
@@ -430,7 +525,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       applyPilotTheme(this.#theme, createPilotTheme(this.#capabilities, this.#themeMode));
       this.#screen.invalidate();
       handle.hide();
-      this.#tui.requestRender(true);
+      this.#liveRegion.redraw();
     };
     dialog.onClose = () => handle.hide();
   }
