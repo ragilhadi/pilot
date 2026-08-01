@@ -337,7 +337,7 @@ function parseCommand(args: readonly string[], defaultModelKey: string): CliComm
       const value = rest[index + 1];
       if (name !== "chat") throw new CliUsageError("--ui is available only for chat");
       if (value === undefined || !isPresentationMode(value)) {
-        throw new CliUsageError("--ui requires one of: auto, tui, plain");
+        throw new CliUsageError("--ui requires one of: auto, tui, fullscreen, plain");
       }
       if (uiSpecified) throw new CliUsageError("--ui may only be specified once");
       ui = value;

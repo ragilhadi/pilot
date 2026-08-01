@@ -163,9 +163,9 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
       environment: process.env,
     });
     const requestedPresentation = presentationFromArguments(args);
-    const useTui = shouldUseTui(args, requestedPresentation, capabilities);
+    const renderMode = shouldUseTui(args, requestedPresentation, capabilities);
     const lines =
-      args[0] === "chat" && !useTui
+      args[0] === "chat" && renderMode === undefined
         ? createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY })
         : undefined;
     const iterator = lines?.[Symbol.asyncIterator]();
@@ -245,7 +245,7 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
           probeCommand,
           languageServers: await probeLanguageServers(),
         });
-        if (useTui) {
+        if (renderMode !== undefined) {
           const [{ ProcessTerminal }, { TerminalChatPresentation }] = await Promise.all([
             import("@earendil-works/pi-tui"),
             import("./tui/terminal-chat-presentation.js"),
@@ -253,6 +253,7 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
           chatPresentation = new TerminalChatPresentation({
             terminal: new ProcessTerminal(),
             capabilities,
+            renderMode,
             workspacePath: process.cwd(),
             models: registry.list().map(({ key, displayName }) => ({ key, displayName })),
             ...(persistence === undefined
@@ -350,21 +351,22 @@ function shouldUseTui(
   args: readonly string[],
   requested: PresentationMode,
   capabilities: ReturnType<typeof detectTerminalCapabilities>,
-): boolean {
-  if (args[0] !== "chat") return false;
+): "inline" | "fullscreen" | undefined {
+  if (args[0] !== "chat") return undefined;
   try {
-    return (
-      resolvePresentationMode({
-        requested,
-        json: args.includes("--json"),
-        screenReader: args.includes("--screen-reader"),
-        capabilities,
-      }) === "tui"
-    );
+    const resolved = resolvePresentationMode({
+      requested,
+      json: args.includes("--json"),
+      screenReader: args.includes("--screen-reader"),
+      capabilities,
+    });
+    if (resolved === "tui") return "inline";
+    if (resolved === "fullscreen") return "fullscreen";
+    return undefined;
   } catch {
     // Command parsing and execution report an explicit --ui tui incompatibility
     // through the normal CLI error boundary, after stdin has a plain fallback.
-    return false;
+    return undefined;
   }
 }
 

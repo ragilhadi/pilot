@@ -137,6 +137,12 @@ export interface TerminalUiState {
   readonly showThinking: boolean;
   readonly currentTurnBlockStart: number | undefined;
   readonly lastTurnSummary: TurnSummary | undefined;
+  /**
+   * How many leading blocks have been written to the terminal's scrollback and must never be drawn
+   * again. Owned by the reducer rather than the renderer so what has been committed stays testable
+   * and the renderer stays a pure function of state.
+   */
+  readonly committedBlockCount: number;
   readonly context?: PromptCompositionSnapshot;
   /** Latest per-segment context breakdown, for the `/context` panel. */
   readonly occupancy?: ContextOccupancy;
@@ -148,6 +154,7 @@ export type TerminalUiAction =
   | { readonly type: "composer.submitted"; readonly id: string; readonly text: string }
   | { readonly type: "ui.toggle-tool-details" }
   | { readonly type: "ui.toggle-thinking" }
+  | { readonly type: "ui.blocks-committed"; readonly count: number }
   | {
       readonly type: "ui.notice";
       readonly id: string;
@@ -168,13 +175,21 @@ export const initialTerminalUiState: TerminalUiState = Object.freeze({
   showThinking: false,
   currentTurnBlockStart: undefined,
   lastTurnSummary: undefined,
+  committedBlockCount: 0,
 });
 
 export function reduceTerminalUi(
   state: TerminalUiState,
   action: TerminalUiAction,
 ): TerminalUiState {
+  if (action.type === "ui.blocks-committed") {
+    // Never moves backwards: a committed row is on the terminal's scrollback and cannot be recalled.
+    const count = Math.min(state.blocks.length, Math.max(state.committedBlockCount, action.count));
+    return count === state.committedBlockCount ? state : { ...state, committedBlockCount: count };
+  }
   if (action.type === "ui.toggle-tool-details") {
+    // Re-rendering already-committed blocks with details is impossible, so the toggle only affects
+    // what is still live. Committed output keeps the form it was committed in.
     return { ...state, showToolDetails: !state.showToolDetails };
   }
   if (action.type === "ui.toggle-thinking") {
