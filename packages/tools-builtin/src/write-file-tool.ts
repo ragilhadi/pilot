@@ -21,8 +21,8 @@ export const WriteFileInputSchema = z
       .min(1)
       .max(4_096)
       .describe(
-        'Workspace-relative path to write, for example "src/new-module.ts". Parent directories ' +
-          "must already exist.",
+        'Workspace-relative path to write, for example "src/new-module.ts". Missing parent ' +
+          "directories are created.",
       ),
     content: z.string().max(1_000_000).describe("The complete contents of the file."),
     baseSha256: sha256Schema
@@ -59,7 +59,8 @@ export function createWriteFileTool(
   return defineTool({
     name: "write_file",
     description:
-      "Create a new text file, or replace an existing file's entire contents.\n\n" +
+      "Create a new text file, or replace an existing file's entire contents. Parent directories " +
+      "are created as needed, so there is no separate step to make a directory.\n\n" +
       "Use this only for new files. To change part of an existing file use edit (single localized " +
       "change) or apply_patch (several changes at once) — rewriting a whole file to alter a few " +
       "lines risks discarding content you have not read.\n\n" +
@@ -82,6 +83,7 @@ export function createWriteFileTool(
           path: input.path,
           content: input.content,
           signal: context.signal,
+          createParentDirectories: true,
         });
         const diagnostics = await collectDiagnostics(
           options.port,

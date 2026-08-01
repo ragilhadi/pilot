@@ -154,6 +154,54 @@ describe("NodeWorkspaceFileSystem", () => {
       fileSystem.createUtf8({ path: "../escape.txt", content: "x\n", signal: signal() }),
     ).rejects.toMatchObject({ code: "PILOT_WORKSPACE_PATH_ESCAPE" });
   });
+
+  it("creates missing parent directories when asked to", async () => {
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const fileSystem = new NodeWorkspaceFileSystem(boundary);
+    const content = "<h1>hello</h1>\n";
+
+    const created = await fileSystem.createUtf8({
+      path: "src/routes/app.html",
+      content,
+      signal: signal(),
+      createParentDirectories: true,
+    });
+
+    expect(created.path).toBe("src/routes/app.html");
+    expect(await readFile(path.join(workspacePath, "src", "routes", "app.html"), "utf8")).toBe(
+      content,
+    );
+  });
+
+  it("still refuses to create parents that escape the workspace", async () => {
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const fileSystem = new NodeWorkspaceFileSystem(boundary);
+
+    await expect(
+      fileSystem.createUtf8({
+        path: "../outside/file.txt",
+        content: "x\n",
+        signal: signal(),
+        createParentDirectories: true,
+      }),
+    ).rejects.toMatchObject({ code: "PILOT_WORKSPACE_PATH_ESCAPE" });
+    await expect(readdir(path.dirname(workspacePath))).resolves.not.toContain("outside");
+  });
+
+  it("creates nothing for a path the boundary refuses on other grounds", async () => {
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const fileSystem = new NodeWorkspaceFileSystem(boundary);
+
+    await expect(
+      fileSystem.createUtf8({
+        path: "/absolute/file.txt",
+        content: "x\n",
+        signal: signal(),
+        createParentDirectories: true,
+      }),
+    ).rejects.toMatchObject({ metadata: { reason: "absolute-path" } });
+    await expect(readdir(workspacePath)).resolves.toEqual([]);
+  });
 });
 
 function sha256(content: string): string {
