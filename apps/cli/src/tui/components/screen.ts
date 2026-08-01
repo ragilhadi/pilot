@@ -37,8 +37,10 @@ export interface ActivitySnapshot {
  * - `inline` renders only the blocks that are still moving. Finished blocks have already been
  *   written to the terminal's scrollback, and the banner was printed once at startup, so redrawing
  *   either would duplicate output the terminal already owns.
- * - `fullscreen` renders the banner and the whole transcript every frame, which is the only way to
- *   keep an app-like pane consistent — at the cost of the scrollback it has to clear to do it.
+ * - `fullscreen` renders the banner and the whole transcript every frame, and `ChatViewport` shows
+ *   the slice of it that fits. Clearing and redrawing is what an app-like pane needs, and the
+ *   alternate screen is what makes it affordable: the clears land in a throwaway buffer, so the
+ *   shell's scrollback is untouched and comes back on exit.
  */
 export type TranscriptRenderMode = "inline" | "fullscreen";
 
@@ -114,9 +116,30 @@ export class PilotScreen implements Component {
   }
 
   render(width: number): string[] {
-    const state = this.#state();
     const inline = this.#mode === "inline";
     const lines = inline ? [] : this.renderBanner(width);
+    lines.push(...this.renderTranscript(width));
+    if (!inline) return lines;
+
+    // The live region must never grow past the screen. If it did, its top would scroll into the
+    // terminal's scrollback while still uncommitted — and committing the block later would write
+    // those rows a second time. Showing the tail keeps the newest output visible, and the block is
+    // committed in full the moment it stops changing.
+    const maxRows = this.#maxRows();
+    return lines.length > maxRows ? lines.slice(lines.length - maxRows) : lines;
+  }
+
+  /**
+   * Everything below the banner.
+   *
+   * Split out because the fullscreen layout scrolls this independently of the banner, which stays
+   * pinned to the top row. In inline mode this is the uncommitted tail; in fullscreen it is the
+   * whole transcript.
+   */
+  renderTranscript(width: number): string[] {
+    const state = this.#state();
+    const inline = this.#mode === "inline";
+    const lines: string[] = [];
     const blocks = inline ? state.blocks.slice(state.committedBlockCount) : state.blocks;
     let previous: TranscriptBlock | undefined;
     for (const block of blocks) {
@@ -152,14 +175,7 @@ export class PilotScreen implements Component {
       );
       if (indicator !== undefined) lines.push(this.#theme.accent(indicator), "");
     }
-    if (!inline) return lines;
-
-    // The live region must never grow past the screen. If it did, its top would scroll into the
-    // terminal's scrollback while still uncommitted — and committing the block later would write
-    // those rows a second time. Showing the tail keeps the newest output visible, and the block is
-    // committed in full the moment it stops changing.
-    const maxRows = this.#maxRows();
-    return lines.length > maxRows ? lines.slice(lines.length - maxRows) : lines;
+    return lines;
   }
 
   #renderBlockCached(

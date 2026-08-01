@@ -237,6 +237,11 @@ describe("inline presentation", () => {
   it("proves that assertion is not vacuous: the fullscreen renderer does erase it", async () => {
     // Same events, same waits, opposite result. If the inline assertion above ever starts passing
     // because nothing was drawn, this one fails alongside it.
+    //
+    // The fullscreen renderer still emits the sequence; what changed is where it lands. Its
+    // terminal is wrapped in FullscreenTerminal, so the erase applies to the alternate screen
+    // buffer and the shell's scrollback is untouched. That wrapper lives one layer out, in the
+    // composition root, which is why it is absent here and the byte is still observable.
     const fullscreen = await recordResizes("fullscreen");
     expect(fullscreen).toContain(eraseScrollback);
   });

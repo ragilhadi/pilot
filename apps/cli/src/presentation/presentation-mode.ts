@@ -1,7 +1,10 @@
 /**
- * `tui` is the inline renderer: finished output goes to the terminal's scrollback and only a bounded
- * live region is redrawn. `fullscreen` keeps the whole transcript in the live buffer, which needs to
- * clear the screen — and the scrollback with it — whenever the terminal is resized.
+ * `tui` is the inline renderer and the default: finished output goes to the terminal's scrollback
+ * and only a bounded live region is redrawn, so native scrolling reaches the whole session and it
+ * survives Pilot exiting. `fullscreen` is an app-like pane on the alternate screen — a pinned
+ * banner and composer with a transcript Pilot scrolls itself. It redraws freely because the
+ * alternate screen keeps those redraws away from the shell's scrollback, but the transcript ends
+ * with the session rather than staying in the terminal.
  */
 export const presentationModes = ["auto", "tui", "fullscreen", "plain"] as const;
 

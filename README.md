@@ -98,8 +98,18 @@ Because committed output belongs to the terminal, it keeps the width it was writ
 does not reflow earlier output, the same way it does not reflow `git log`. Reflowing it would mean
 rewriting it, and rewriting it is what clears a scrollback.
 
-Force a mode explicitly with `--ui tui` (inline, the default), `--ui fullscreen` (the whole
-transcript stays in the live buffer, which clears the screen to redraw on resize), `--ui plain`,
+`--ui fullscreen` is the other shape: an app-like pane on the alternate screen buffer, with the
+banner and composer pinned and the transcript scrolled by Pilot rather than the terminal — `PgUp`
+and `PgDn` by a screenful, `Shift+Up`/`Shift+Down` by a line, or the mouse wheel. A rule above the
+composer reports how many lines are still below whenever you have scrolled back; sending a prompt,
+paging past the end, or pressing `Esc` while idle returns to the newest output. Nothing it draws
+touches your shell's scrollback, which comes back untouched on exit — but the transcript ends with
+the session instead of staying in the terminal, which is the trade against the default.
+
+Because the wheel scrolls the transcript there, the terminal's own text selection needs `Shift`
+held down; set `PILOT_TUI_MOUSE=0` to keep selection unmodified and scroll by keyboard only.
+
+Force a mode explicitly with `--ui tui` (inline, the default), `--ui fullscreen`, `--ui plain`,
 `--screen-reader`, or `--json`. Sessions and tool activity are stored in SQLite under
 `PILOT_DATA_DIR` (default `~/.pilot`).
 
