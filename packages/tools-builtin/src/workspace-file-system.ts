@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import { open, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import {
   CancellationError,
@@ -8,6 +8,7 @@ import {
   type WorkspaceBoundary,
   type WorkspacePath,
 } from "@pilotrun/core";
+import { WorkspacePathError } from "./workspace-boundary.js";
 
 const defaultMaximumFileBytes = 10_000_000;
 
@@ -37,6 +38,8 @@ export interface CreateFileInput {
   readonly path: string;
   readonly content: string;
   readonly signal: AbortSignal;
+  /** Create missing parent directories inside the workspace instead of failing. */
+  readonly createParentDirectories?: boolean;
 }
 
 export interface CreateFileResult {
@@ -190,7 +193,16 @@ export class NodeWorkspaceFileSystem implements WorkspaceFileSystem {
       });
     }
     throwIfCancelled(input.signal);
-    const resolved = await this.#boundary.resolve(input.path, "write");
+    // Resolving first means a path the boundary would reject outright — absolute, escaping, on
+    // another drive — is refused before any directory is created for it.
+    let resolved: WorkspacePath;
+    try {
+      resolved = await this.#boundary.resolve(input.path, "write");
+    } catch (error) {
+      if (input.createParentDirectories !== true || !isMissingParent(error)) throw error;
+      await this.#createParentDirectories(input.path, input.signal);
+      resolved = await this.#boundary.resolve(input.path, "write");
+    }
     if (resolved.exists) {
       throw new WorkspaceFileExistsError(resolved.relativePath);
     }
@@ -227,10 +239,42 @@ export class NodeWorkspaceFileSystem implements WorkspaceFileSystem {
       );
     }
   }
+
+  /**
+   * Creates the target's missing ancestors one segment at a time, re-resolving each prefix through
+   * the boundary before it is created. Creating the whole chain with a single recursive mkdir would
+   * skip that check, so a symlinked intermediate directory could place the new directories — and
+   * then the file — outside the workspace.
+   */
+  async #createParentDirectories(requestedPath: string, signal: AbortSignal): Promise<void> {
+    const segments = requestedPath.split(/[\\/]/u).filter((segment) => segment.length > 0);
+    segments.pop();
+    let prefix = "";
+    for (const segment of segments) {
+      throwIfCancelled(signal);
+      prefix = prefix === "" ? segment : `${prefix}/${segment}`;
+      const resolved = await this.#boundary.resolve(prefix, "write");
+      if (resolved.exists) continue;
+      try {
+        await mkdir(resolved.absolutePath);
+      } catch (error) {
+        if (isErrnoException(error) && error.code === "EEXIST") continue;
+        throw new AtomicWriteError(
+          "A parent directory of the new workspace file could not be created",
+          { path: resolved.relativePath },
+          error,
+        );
+      }
+    }
+  }
 }
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function isMissingParent(error: unknown): boolean {
+  return error instanceof WorkspacePathError && error.reason === "unresolved-write-parent";
 }
 
 async function safeReadRegularFile(

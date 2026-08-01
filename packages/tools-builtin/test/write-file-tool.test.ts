@@ -17,6 +17,7 @@ const emptySha256 = createHash("sha256").update(Buffer.alloc(0)).digest("hex");
 
 class MemoryWorkspaceFileSystem implements WorkspaceFileSystem {
   readonly files = new Map<string, string>();
+  lastCreate: CreateFileInput | undefined;
 
   async readUtf8(path: string): Promise<WorkspaceFileSnapshot> {
     const content = this.files.get(path);
@@ -47,6 +48,7 @@ class MemoryWorkspaceFileSystem implements WorkspaceFileSystem {
   }
 
   async createUtf8(input: CreateFileInput): Promise<CreateFileResult> {
+    this.lastCreate = input;
     if (this.files.has(input.path)) {
       throw new PilotError({
         code: "PILOT_WORKSPACE_FILE_EXISTS",
@@ -76,6 +78,7 @@ describe("write_file tool", () => {
     );
 
     expect(fileSystem.files.get("src/new.ts")).toBe(content);
+    expect(fileSystem.lastCreate?.createParentDirectories).toBe(true);
     expect(result.output).toMatchObject({
       path: "src/new.ts",
       sha256: sha256(content),
