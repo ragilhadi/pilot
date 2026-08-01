@@ -13,9 +13,14 @@ import {
 import * as z from "zod";
 import { classifyCommandRisk, type CommandIntent } from "./command-risk.js";
 
+// `mode` is optional on both object forms, and a bare string is accepted as shell mode. Small
+// models routinely send `"command": "npm test"` or drop the discriminator, and a strict
+// discriminated union answered every one of those with the same opaque
+// "expected object, received string" — leaving the model no way to run anything at all. The shape
+// is inferred instead, and normalized to a CommandIntent by the transform below.
 const DirectCommandSchema = z
   .object({
-    mode: z.literal("direct").describe('Must be the exact string "direct".'),
+    mode: z.literal("direct").optional().describe('Optional; the exact string "direct".'),
     executable: z
       .string()
       .min(1)
@@ -34,7 +39,7 @@ const DirectCommandSchema = z
 
 const ShellCommandSchema = z
   .object({
-    mode: z.literal("shell").describe('Must be the exact string "shell".'),
+    mode: z.literal("shell").optional().describe('Optional; the exact string "shell".'),
     command: z
       .string()
       .min(1)
@@ -47,17 +52,35 @@ const ShellCommandSchema = z
   .strict()
   .readonly();
 
+const ShellCommandStringSchema = z
+  .string()
+  .min(1)
+  .max(32_768)
+  .refine(withoutNull)
+  .describe('A full command line run through the shell, for example "npm test | tail -20".');
+
+const CommandIntentSchema = z
+  .union([DirectCommandSchema, ShellCommandSchema, ShellCommandStringSchema])
+  .describe(
+    "The command to run, in any of three forms: " +
+      '{"mode": "direct", "executable": "npm", "args": ["run", "test"]} (preferred), ' +
+      '{"mode": "shell", "command": "npm run test | tail -20"}, or the plain string ' +
+      '"npm run test | tail -20" (equivalent to shell mode). ' +
+      "Prefer direct form; use a shell only when you need pipes, redirection, globbing, " +
+      "or chaining.",
+  )
+  .transform(
+    (value): CommandIntent =>
+      typeof value === "string"
+        ? { mode: "shell", command: value }
+        : "executable" in value
+          ? { mode: "direct", executable: value.executable, args: value.args }
+          : { mode: "shell", command: value.command },
+  );
+
 export const RunCommandInputSchema = z
   .object({
-    command: z
-      .discriminatedUnion("mode", [DirectCommandSchema, ShellCommandSchema])
-      .describe(
-        "An object — not a string. Either " +
-          '{"mode": "direct", "executable": "npm", "args": ["run", "test"]} or ' +
-          '{"mode": "shell", "command": "npm run test | tail -20"}. ' +
-          "Prefer direct mode; use shell mode only when you need pipes, redirection, globbing, " +
-          "or chaining.",
-      ),
+    command: CommandIntentSchema,
     cwd: z
       .string()
       .min(1)
@@ -313,11 +336,13 @@ export function createRunCommandTool(
     name: "run_command",
     description:
       "Run a command in the workspace — build, test, lint, or any other tooling.\n\n" +
-      "The command argument is an OBJECT, not a string, and has two forms:\n" +
+      "The command argument takes any of these forms:\n" +
       '  direct (preferred): {"command": {"mode": "direct", "executable": "npm", ' +
       '"args": ["run", "test"]}}\n' +
-      "  shell (only when you need pipes, redirection, globbing, or &&): " +
-      '{"command": {"mode": "shell", "command": "npm run test | tail -20"}}\n\n' +
+      "  shell (when you need pipes, redirection, globbing, or &&): " +
+      '{"command": {"mode": "shell", "command": "npm run test | tail -20"}}\n' +
+      '  shorthand: {"command": "npm run test | tail -20"} — a plain string runs through the ' +
+      "shell.\n\n" +
       "Do not use this to read or search files — read_file, grep, and glob are faster, cheaper, " +
       "and do not require approval.\n\n" +
       "A non-zero exit code is returned as a normal result, not an error: inspect stdout, stderr, " +

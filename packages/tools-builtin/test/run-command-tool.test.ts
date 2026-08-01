@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runId, toolCallId } from "@pilotrun/core";
+import { runId, toolCallId, toolToModelDefinition } from "@pilotrun/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRunCommandTool,
@@ -121,6 +121,47 @@ describe("run_command tool contract", () => {
       metadata: { variable: "API_TOKEN" },
     });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a plain string", "npm run test | tail -20"],
+    ["a shell object without mode", { command: "npm run test | tail -20" }],
+  ])("accepts %s as shell mode", (_label, command) => {
+    expect(RunCommandInputSchema.parse({ command }).command).toEqual({
+      mode: "shell",
+      command: "npm run test | tail -20",
+    });
+  });
+
+  it("accepts a direct command without mode", () => {
+    expect(
+      RunCommandInputSchema.parse({ command: { executable: "npm", args: ["run", "test"] } })
+        .command,
+    ).toEqual({ mode: "direct", executable: "npm", args: ["run", "test"] });
+  });
+
+  it("classifies and routes a string command through the shell", async () => {
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const tool = createRunCommandTool(boundary, {
+      shell: { executable: "test-shell", argsPrefix: ["-c"] },
+    });
+
+    expect(
+      tool.permissionAction?.(RunCommandInputSchema.parse({ command: "rm -rf /" })),
+    ).toMatchObject({
+      kind: "command",
+      executable: "test-shell",
+      args: ["-c", "rm -rf /"],
+      risk: "destructive",
+    });
+  });
+
+  it("advertises every accepted command form in its JSON Schema", async () => {
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const schema = toolToModelDefinition(createRunCommandTool(boundary)).inputSchema;
+    const command = (schema.properties as Record<string, { anyOf?: readonly unknown[] }>).command;
+
+    expect(command?.anyOf).toHaveLength(3);
   });
 });
 

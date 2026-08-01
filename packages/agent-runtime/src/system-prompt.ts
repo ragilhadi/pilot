@@ -111,10 +111,10 @@ export function composeSystemPrompt(input: SystemPromptInput): string {
     sections.push(
       [
         "# Running commands",
-        "`run_command` takes an object, not a string:",
+        "`run_command` prefers a direct invocation, which needs no shell:",
         '  `{"command": {"mode": "direct", "executable": "npm", "args": ["test"]}}`',
-        'Use `{"mode": "shell", "command": "..."}` only when you need pipes, redirection, ' +
-          "globbing, or `&&`.",
+        'Use `{"mode": "shell", "command": "..."}` — or the shorthand `{"command": "..."}` — ' +
+          "when you need pipes, redirection, globbing, or `&&`.",
         "Do not shell out to `cat`, `ls`, `find`, `grep`, or `sed` — the dedicated tools are " +
           "faster and need no approval. A non-zero exit code comes back as a normal result, so " +
           "read `stdout`, `stderr`, and `exitCode` before deciding what to do.",
