@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/lsp",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "Language-server diagnostics for the Pilot coding agent.",
   "license": "MIT",
   "publishConfig": {

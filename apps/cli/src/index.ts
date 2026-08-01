@@ -128,6 +128,8 @@ export {
 export const applicationVersion = "0.0.0";
 export const pilotDataDirectoryEnvironmentVariable = "PILOT_DATA_DIR";
 export const pilotLogLevelEnvironmentVariable = "PILOT_LOG_LEVEL";
+/** Set to "0" to keep terminal-native text selection instead of scrolling with the wheel. */
+export const pilotMouseEnvironmentVariable = "PILOT_TUI_MOUSE";
 
 export interface StartupEventDependencies {
   readonly clock: Clock;
@@ -246,12 +248,24 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
           languageServers: await probeLanguageServers(),
         });
         if (renderMode !== undefined) {
-          const [{ ProcessTerminal }, { TerminalChatPresentation }] = await Promise.all([
-            import("@earendil-works/pi-tui"),
-            import("./tui/terminal-chat-presentation.js"),
-          ]);
+          const [{ ProcessTerminal }, { TerminalChatPresentation }, { FullscreenTerminal }] =
+            await Promise.all([
+              import("@earendil-works/pi-tui"),
+              import("./tui/terminal-chat-presentation.js"),
+              import("./tui/fullscreen-terminal.js"),
+            ]);
+          const processTerminal = new ProcessTerminal();
           chatPresentation = new TerminalChatPresentation({
-            terminal: new ProcessTerminal(),
+            // The alternate screen is what makes fullscreen mode safe to redraw: its clears land in
+            // a throwaway buffer, so the shell's scrollback survives untouched and comes back on
+            // exit. Inline mode must never enter it — the scrollback is where its output lives.
+            terminal:
+              renderMode === "inline"
+                ? processTerminal
+                : new FullscreenTerminal(processTerminal, {
+                    mouse: process.env[pilotMouseEnvironmentVariable] !== "0",
+                    onProcessExit: (restore) => process.once("exit", restore),
+                  }),
             capabilities,
             renderMode,
             workspacePath: process.cwd(),

@@ -21,6 +21,8 @@ import {
   summarizeToolCall,
   type TranscriptRenderMode,
 } from "./components/screen.js";
+import { ChatViewport } from "./components/viewport.js";
+import { isMouseReport, wheelScrollDelta } from "./fullscreen-terminal.js";
 import { formatDuration } from "./render-helpers.js";
 import { PiTuiLiveRegion } from "./live-region.js";
 import { ResizeInterceptingTerminal } from "./resize-interceptor.js";
@@ -43,7 +45,11 @@ import {
 
 export { PilotFooter } from "./components/footer.js";
 export { PilotScreen } from "./components/screen.js";
+export { ChatViewport } from "./components/viewport.js";
 export type { RepositoryDisplayState } from "./components/screen.js";
+
+/** How many transcript lines one wheel notch moves. */
+const wheelLinesPerNotch = 3;
 
 export interface TerminalChatPresentationOptions {
   readonly terminal: Terminal;
@@ -60,7 +66,9 @@ export interface TerminalChatPresentationOptions {
   /**
    * `inline` (default) commits finished output to the terminal's scrollback and redraws only a
    * bounded live region, so native scrolling reaches the session transcript and whatever was on
-   * screen before Pilot started. `fullscreen` keeps the whole transcript in the live buffer.
+   * screen before Pilot started. `fullscreen` lays the transcript out in a {@link ChatViewport}
+   * sized to the terminal and scrolls it itself; it expects the terminal to already be on the
+   * alternate screen buffer — see `FullscreenTerminal`.
    */
   readonly renderMode?: TranscriptRenderMode;
 }
@@ -89,6 +97,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   readonly #editor: Editor;
   readonly #screen: PilotScreen;
   readonly #footer: PilotFooter;
+  readonly #viewport: ChatViewport | undefined;
   readonly #theme: PilotTheme;
   readonly #workspacePath: string;
   readonly #capabilities: TerminalCapabilitySnapshot;
@@ -164,9 +173,24 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     );
     this.#footer = new PilotFooter(() => this.#state, this.#theme, options.capabilities);
     this.#editor.onSubmit = (text) => this.#submit(text);
-    this.#tui.addChild(this.#screen);
-    this.#tui.addChild(this.#editor);
-    this.#tui.addChild(this.#footer);
+    if (this.#renderMode === "fullscreen") {
+      // One child that lays the frame out itself, because the layout depends on the terminal's
+      // height and a stacked child only ever learns its width.
+      this.#viewport = new ChatViewport({
+        screen: this.#screen,
+        editor: this.#editor,
+        footer: this.#footer,
+        theme: this.#theme,
+        capabilities: options.capabilities,
+        rows: () => this.#terminal.rows,
+      });
+      this.#tui.addChild(this.#viewport);
+    } else {
+      this.#viewport = undefined;
+      this.#tui.addChild(this.#screen);
+      this.#tui.addChild(this.#editor);
+      this.#tui.addChild(this.#footer);
+    }
     this.#tui.setFocus(this.#editor);
     this.#tui.addInputListener((data) => this.#handleGlobalInput(data));
     this.#terminal.setTitle(`Pilot — ${path.basename(this.#workspacePath)}`);
@@ -351,6 +375,9 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
       return;
     }
     this.#submissionSequence += 1;
+    // Sending a prompt is a statement of interest in what happens next, so it always returns the
+    // viewport to the newest output.
+    this.#viewport?.scrollToBottom();
     this.#state = reduceTerminalUi(this.#state, {
       type: "composer.submitted",
       id: `local:${this.#submissionSequence}`,
@@ -368,6 +395,8 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
 
   #handleGlobalInput(data: string): { readonly consume?: boolean } | undefined {
     if (this.#tui.hasOverlay()) return undefined;
+    const scrolled = this.#handleScrollInput(data);
+    if (scrolled !== undefined) return scrolled;
     if (matchesKey(data, Key.ctrl("c"))) {
       if (this.#state.phase !== "ready" && this.#state.phase !== "starting") {
         this.#enqueue("/abort");
@@ -435,6 +464,45 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   }
 
   /**
+   * Transcript scrolling, which exists only in the fullscreen layout — inline hands scrolling to
+   * the terminal, where the wheel and Shift+PgUp already reach committed output. Mouse reports are
+   * swallowed in both, because the composer would otherwise type them as escape-sequence gibberish.
+   */
+  #handleScrollInput(data: string): { readonly consume?: boolean } | undefined {
+    const viewport = this.#viewport;
+    if (isMouseReport(data)) {
+      const delta = wheelScrollDelta(data);
+      if (delta !== 0) {
+        viewport?.scrollLines(delta * wheelLinesPerNotch);
+        this.#tui.requestRender();
+      }
+      return { consume: true };
+    }
+    if (viewport === undefined) return undefined;
+    if (matchesKey(data, Key.pageUp)) return this.#scroll(() => viewport.scrollPages(-1));
+    if (matchesKey(data, Key.pageDown)) return this.#scroll(() => viewport.scrollPages(1));
+    if (matchesKey(data, Key.shift("up"))) return this.#scroll(() => viewport.scrollLines(-1));
+    if (matchesKey(data, Key.shift("down"))) return this.#scroll(() => viewport.scrollLines(1));
+    // Escape already cancels a running turn; while idle and scrolled back it returns to the latest
+    // output instead, which is the other thing "get me out of this view" should mean.
+    if (
+      matchesKey(data, Key.escape) &&
+      this.#state.phase === "ready" &&
+      !viewport.following &&
+      this.#editor.getText().length === 0
+    ) {
+      return this.#scroll(() => viewport.scrollToBottom());
+    }
+    return undefined;
+  }
+
+  #scroll(move: () => void): { readonly consume: true } {
+    move();
+    this.#tui.requestRender();
+    return { consume: true };
+  }
+
+  /**
    * Asks before ending the session.
    *
    * Ctrl+C twice in a row stays immediate: the double press is its own confirmation, and it is the
@@ -479,7 +547,15 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
         "Ctrl+J       Insert newline",
         "Tab          Accept command or file completion",
         "@path        Attach a file as context (ignored files are skipped)",
-        "Esc          Close dialog or cancel active turn",
+        ...(this.#renderMode === "fullscreen"
+          ? [
+              "PgUp/PgDn    Scroll the transcript by a screenful",
+              "Shift+Up/Dn  Scroll the transcript by a line (the wheel also works)",
+            ]
+          : []),
+        this.#renderMode === "fullscreen"
+          ? "Esc          Close dialog, cancel active turn, or follow the latest output"
+          : "Esc          Close dialog or cancel active turn",
         "Ctrl+O       Toggle detailed tool output",
         "Ctrl+T       Toggle model thinking (reasoning)",
         "Ctrl+Y       Copy a code block (empty composer)",
