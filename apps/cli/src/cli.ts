@@ -1,74 +1,77 @@
 import {
   ApplicationRunner,
-  ConversationModelRequestContextPreparer,
   ContextEngineError,
+  type ContextOccupancy,
+  type ContextSource,
+  ConversationModelRequestContextPreparer,
   createSystemPromptContextSource,
   InMemorySessionRepository,
   type InstructionDiscovery,
   type InstructionTarget,
   type ModelRegistry,
-  type ContextSource,
   ModelStreamAccumulator,
   PermissionPolicyEngine,
+  type PromptCompositionSnapshot,
   RepositoryRunLifecycleCheckpointWriter,
+  RequestTokenAccountant,
   RunInterruptionQueue,
+  ScriptAwareHeuristicCounter,
   SessionConversationRunner,
   ThrottledRunCheckpointWriter,
-  ToolResultContextFormatter,
+  TokenCounterContextEstimator,
   ToolRegistry,
-  Utf8HeuristicTokenEstimator,
-  type PromptCompositionSnapshot,
+  ToolResultContextFormatter,
 } from "@pilotrun/agent-runtime";
 import {
   type AgentMessage,
   builtinConfiguration,
   type Clock,
   ConfigurationError,
-  type IdSource,
-  type JsonValue,
   type EffectiveConfiguration,
   type EnvironmentReference,
+  type IdSource,
+  type JsonValue,
   messageId,
+  type PersistenceRepositories,
   parseAgentMessage,
   parseModelRequest,
-  runId,
-  type PersistenceRepositories,
   resolveEnvironmentReference,
+  runId,
   SessionError,
   sessionId,
-  toSafeErrorSnapshot,
   type ToolRisk,
-  type WorkspaceDiagnosticsPort,
+  toSafeErrorSnapshot,
   type WorkspaceBoundary,
+  type WorkspaceDiagnosticsPort,
 } from "@pilotrun/core";
+import { LspDiagnosticsService } from "@pilotrun/lsp";
 import {
   diagnoseSqliteDatabase,
   type SqliteDatabase,
   type SqliteSessionAdministration,
 } from "@pilotrun/persistence-sqlite";
-import { LspDiagnosticsService } from "@pilotrun/lsp";
 import {
+  type ContextMentionResolution,
   createApplyPatchTool,
-  createDiagnosticsTool,
-  createQuestionTool,
-  createTavilyWebSearchProvider,
   createBuiltinFileListTools,
+  createDiagnosticsTool,
   createEditFileTool,
-  createGrepTool,
   createGitTools,
+  createGrepTool,
+  createQuestionTool,
   createReadFileTool,
   createRunCommandTool,
+  createTavilyWebSearchProvider,
   createTodoTools,
   createWebFetchTool,
   createWebSearchTool,
   createWriteFileTool,
+  type GitCommandRunner,
   InMemoryChangeJournal,
   InMemoryTodoStore,
-  NodeWorkspaceFileSystem,
   NodeWorkspaceBoundary,
+  NodeWorkspaceFileSystem,
   resolveContextMentions,
-  type ContextMentionResolution,
-  type GitCommandRunner,
 } from "@pilotrun/tools-builtin";
 import {
   ChatEventFactory,
@@ -1162,10 +1165,15 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   const modelStartedAt = new Map<string, number>();
   const toolStartedAt = new Map<string, number>();
   let latestContextSnapshot: PromptCompositionSnapshot | undefined;
+  let latestOccupancy: ContextOccupancy | undefined;
   const configuredContext = dependencies.configuration?.configuration.context;
-  const sharedTokenEstimator = new Utf8HeuristicTokenEstimator();
-  /** Once a provider reports real usage, stop publishing Pilot's own estimate. */
-  let providerUsageSeen = false;
+  /** The configured ceiling on prompt tokens, shared by the context budget and the footer. */
+  const configuredContextTokens = configuredContext?.maxInputTokens ?? 120_000;
+  // One counter behind every token figure in the process: context admission, prompt composition,
+  // the run-budget reservation, and the occupancy shown in the footer.
+  const tokenCounter = new ScriptAwareHeuristicCounter();
+  const sharedTokenEstimator = new TokenCounterContextEstimator(tokenCounter);
+  const tokenAccountant = new RequestTokenAccountant(tokenCounter);
   const systemPromptContextSource: ContextSource | undefined =
     dependencies.configuration?.configuration.prompt.systemPrompt === "none"
       ? undefined
@@ -1228,17 +1236,11 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
                 dependencies.configuration?.configuration.persistence.checkpointIntervalMs ?? 250,
             },
           ),
-    // One estimator for the whole app. This used to be a third, independent heuristic
-    // (chars / 4 over the serialized messages) that disagreed with both the context engine and
-    // the provider's reported usage.
-    estimateModelCall: ({ request }) => ({
-      inputTokens: Math.max(
-        1,
-        request.messages.reduce(
-          (total, message) => total + sharedTokenEstimator.estimate(message).tokens,
-          0,
-        ),
-      ),
+    // Reserve against what is actually sent. Summing the messages alone left the tool JSON schemas
+    // unaccounted for — tens of kilobytes re-sent on every request — so the reservation ran far
+    // below the real cost and weakened the budget it was there to enforce.
+    estimateModelCall: ({ request, model }) => ({
+      inputTokens: Math.max(1, tokenAccountant.measureRequest(request, model).totalTokens),
       outputTokens: request.maxOutputTokens ?? 4_096,
     }),
     retry: { random: Math.random, sleep: abortableDelay },
@@ -1247,7 +1249,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
     permissionMode: "interactive",
     userInteraction: interaction,
     contextPreparer: new ConversationModelRequestContextPreparer({
-      configuredContextTokens: configuredContext?.maxInputTokens ?? 120_000,
+      configuredContextTokens,
       reservedOutputTokens: configuredContext?.reservedOutputTokens ?? 4_096,
       tokenEstimator: sharedTokenEstimator,
       now: () => dependencies.clock.now().toISOString(),
@@ -1258,34 +1260,34 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
         return sources.length === 0 ? {} : { additionalSources: sources, targetPaths: ["."] };
       })(),
     }),
-    onContextPrepared: (snapshot) => {
+    onContextPrepared: (snapshot, prepared) => {
       latestContextSnapshot = snapshot;
-      // Some OpenAI-compatible servers never report usage. Rather than leaving the footer blank,
-      // publish the composed estimate — marked as an estimate — so there is always a figure.
-      if (!providerUsageSeen) {
-        emit({
-          type: "model.stream",
-          sessionId: id,
-          runId: runId(snapshot.runId),
-          payload: {
-            event: {
-              type: "usage.updated",
-              sequence: 0,
-              responseId: `context:${snapshot.cycle}`,
-              usage: { inputTokens: snapshot.composedTokens, source: "estimated" },
-            },
-          },
-        });
-      }
+      // Publish occupancy on every cycle, unconditionally.
+      //
+      // This used to stop as soon as a provider reported usage, which handed the display to
+      // Ollama's `prompt_eval_count` — a count of the tokens the runner *evaluated*, not the size
+      // of the prompt. Once the KV cache holds the conversation prefix that figure collapses, so
+      // the context reading fell as the conversation grew. Occupancy is measured here instead,
+      // over the payload about to be sent, and the provider's number is kept for cost alone.
+      latestOccupancy = tokenAccountant.measureRequest(prepared.request, prepared.model);
+      emit({
+        type: "context.occupancy",
+        sessionId: id,
+        runId: runId(snapshot.runId),
+        payload: (() => {
+          const contextWindowTokens = effectiveContextWindowFor(prepared.descriptor.key);
+          return {
+            occupancy: latestOccupancy,
+            ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
+          };
+        })(),
+      });
     },
     toolResultContextFormatter: new ToolResultContextFormatter({
       maximumBytes: dependencies.configuration?.configuration.context.maxToolResultBytes ?? 32_768,
     }),
     onModelEvent: (event, context) => {
       const now = dependencies.monotonicNow?.() ?? 0;
-      if (event.type === "usage.updated" && event.usage.source === "provider") {
-        providerUsageSeen = true;
-      }
       if (event.type === "response.started") modelStartedAt.set(context.runId, now);
       if (event.type === "text.delta") {
         const startedAt = modelStartedAt.get(context.runId);
@@ -1427,12 +1429,23 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   });
 
   let activeModelKey = command.modelKey;
-  /** The model's declared context window, so the footer can show usage as a fraction of it. */
-  const contextWindowFor = (key: string): number | undefined =>
-    dependencies.registry.list().find((descriptor) => descriptor.key === key)?.capabilities
-      .maxContextTokens;
+  /**
+   * The window the session can actually fill: the smaller of what the model declares and what the
+   * configuration allows.
+   *
+   * The footer used to divide by the model's declared window while admission enforced the
+   * configured limit, so on a 128k model with the default 120k configuration the percentage was
+   * wrong even when the token count was right. One denominator, computed once, used by the
+   * footer, the occupancy event, and the context budget alike.
+   */
+  const effectiveContextWindowFor = (key: string): number | undefined => {
+    const declared = dependencies.registry.list().find((descriptor) => descriptor.key === key)
+      ?.capabilities.maxContextTokens;
+    if (declared === undefined) return configuredContextTokens;
+    return Math.min(declared, configuredContextTokens);
+  };
   const modelPayload = (key: string) => {
-    const contextWindowTokens = contextWindowFor(key);
+    const contextWindowTokens = effectiveContextWindowFor(key);
     return {
       modelKey: key,
       ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),

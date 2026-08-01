@@ -1,4 +1,11 @@
 import type {
+  ContextOccupancy,
+  ConversationIncomplete,
+  PromptCompositionSnapshot,
+  RunState,
+  ToolExecutionLifecycleEvent,
+} from "@pilotrun/agent-runtime";
+import type {
   AgentMessage,
   ClarificationRequest,
   Clock,
@@ -10,12 +17,6 @@ import type {
   SafeErrorSnapshot,
   SessionId,
 } from "@pilotrun/core";
-import type {
-  ConversationIncomplete,
-  PromptCompositionSnapshot,
-  RunState,
-  ToolExecutionLifecycleEvent,
-} from "@pilotrun/agent-runtime";
 import type { CommandOutputEvent } from "@pilotrun/tools-builtin";
 import type { TextWriter } from "./cli.js";
 import { sanitizeTerminalText } from "./presentation/sanitize-terminal-text.js";
@@ -58,6 +59,15 @@ export type ChatEvent =
           readonly detail?: string;
         }[];
       }
+    >
+  /**
+   * How full the context window is, measured locally over the payload the provider is about to
+   * receive. Separate from `model.stream`'s `usage.updated` because that carries what the provider
+   * *billed*, which on a KV-cached runner is not the size of the prompt.
+   */
+  | ChatEventBase<
+      "context.occupancy",
+      { readonly occupancy: ContextOccupancy; readonly contextWindowTokens?: number }
     >
   | ChatEventBase<"model.stream", { readonly event: ModelStreamEvent }>
   | ChatEventBase<
@@ -160,6 +170,10 @@ export class ChatEventRenderer {
         break;
       case "chat.input.queued":
         this.#stdout.write("\n[follow-up queued]\n");
+        break;
+      case "context.occupancy":
+        // Plain mode prints the breakdown only on request via /context; a per-cycle line here would
+        // interleave with streamed output.
         break;
       case "chat.context.attached": {
         const summary = formatContextAttachmentSummary(event.payload);

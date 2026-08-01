@@ -3,56 +3,40 @@ import {
   CancellationError,
   type Clock,
   JsonValueSchema,
-  messageId,
+  type LanguageModel,
   type ModelDescriptor,
   ModelError,
   type ModelRequest,
   type ModelStreamEvent,
-  parseAgentMessage,
-  parseModelRequest,
+  messageId,
   type PermissionAction,
   type PermissionDecision,
   PilotError,
+  parseAgentMessage,
+  parseModelRequest,
   type RetryPolicy,
   type RunId,
   type SafeErrorSnapshot,
-  toSafeErrorSnapshot,
   ToolContractError,
+  toSafeErrorSnapshot,
   type UserInteraction,
 } from "@pilotrun/core";
+import type { ModelRegistry } from "./model-registry.js";
 import {
-  type ModelStreamOutcome,
   ModelStreamAccumulator,
+  type ModelStreamOutcome,
   type StreamProgressSnapshot,
 } from "./model-stream-accumulator.js";
-import type { ModelRegistry } from "./model-registry.js";
-import { PermissionPolicyEngine } from "./permission-policy.js";
-import {
-  interruptedToolRecovery,
-  permissionDeniedRecovery,
-  recoveryForToolError,
-} from "./tool-recovery.js";
 import { PermissionCoordinator, type PermissionResolutionMode } from "./permission-coordinator.js";
-import {
-  type PendingToolCall,
-  type ScheduledToolResult,
-  ToolCallScheduler,
-  ToolExecutionInterruptedError,
-  type ToolExecutionLifecycleEvent,
-} from "./tool-call-scheduler.js";
-import { ToolRegistry } from "./tool-registry.js";
-import {
-  ToolResultContextFormatter,
-  type ToolResultContextFormatterPort,
-} from "./tool-result-context.js";
+import { PermissionPolicyEngine } from "./permission-policy.js";
 import type {
   ModelRequestContextPreparer,
   PromptCompositionSnapshot,
 } from "./prompt-composition.js";
 import {
   classifyModelRetryError,
-  RetryExecutor,
   type RetryClassification,
+  RetryExecutor,
   type RetryExecutorDependencies,
   type RetryLifecycleEvent,
 } from "./retry-executor.js";
@@ -71,6 +55,23 @@ import {
   type RunState,
   RunStateMachine,
 } from "./run-state-machine.js";
+import {
+  type PendingToolCall,
+  type ScheduledToolResult,
+  ToolCallScheduler,
+  ToolExecutionInterruptedError,
+  type ToolExecutionLifecycleEvent,
+} from "./tool-call-scheduler.js";
+import {
+  interruptedToolRecovery,
+  permissionDeniedRecovery,
+  recoveryForToolError,
+} from "./tool-recovery.js";
+import { ToolRegistry } from "./tool-registry.js";
+import {
+  ToolResultContextFormatter,
+  type ToolResultContextFormatterPort,
+} from "./tool-result-context.js";
 
 export const runCheckpointSchemaVersion = 1 as const;
 
@@ -111,6 +112,11 @@ export interface ModelCallBudgetEstimate {
 export interface ModelCallBudgetEstimateInput {
   readonly request: ModelRequest;
   readonly descriptor: ModelDescriptor;
+  /**
+   * The resolved model, so an estimator can ask it to describe its own request payload rather than
+   * guessing the wire shape from the domain request.
+   */
+  readonly model: LanguageModel;
   readonly cycle: number;
   readonly attempt: number;
   readonly signal: AbortSignal;
@@ -119,6 +125,12 @@ export interface ModelCallBudgetEstimateInput {
 export type ModelCallBudgetEstimator = (
   input: ModelCallBudgetEstimateInput,
 ) => ModelCallBudgetEstimate | Promise<ModelCallBudgetEstimate>;
+
+export interface PreparedContextDetail {
+  readonly request: ModelRequest;
+  readonly descriptor: ModelDescriptor;
+  readonly model: LanguageModel;
+}
 
 export interface ApplicationRunnerDependencies {
   readonly registry: ModelRegistry;
@@ -138,7 +150,17 @@ export interface ApplicationRunnerDependencies {
   readonly onToolEvent?: (event: ToolExecutionLifecycleEvent) => void | Promise<void>;
   readonly toolResultContextFormatter?: ToolResultContextFormatterPort;
   readonly contextPreparer?: ModelRequestContextPreparer;
-  readonly onContextPrepared?: (snapshot: PromptCompositionSnapshot) => void | Promise<void>;
+  /**
+   * Called once per cycle with the composed prompt.
+   *
+   * The prepared request and resolved model are passed alongside the snapshot so a caller can
+   * measure what will actually be sent — the snapshot covers the selected context candidates, but
+   * not the tool definitions or the template framing that ride along with every request.
+   */
+  readonly onContextPrepared?: (
+    snapshot: PromptCompositionSnapshot,
+    context: PreparedContextDetail,
+  ) => void | Promise<void>;
 }
 
 export interface ApplicationRunInput {
@@ -264,13 +286,18 @@ export class ApplicationRunner {
           const prepared = await this.#dependencies.contextPreparer.prepare({
             request,
             descriptor: resolved.descriptor,
+            model: resolved.model,
             runId: input.runId,
             cycle,
             signal: controller.signal,
           });
           request = parseModelRequest(prepared.request);
           resolved = this.#dependencies.registry.resolve(input.modelKey, request);
-          await this.#dependencies.onContextPrepared?.(prepared.snapshot);
+          await this.#dependencies.onContextPrepared?.(prepared.snapshot, {
+            request,
+            descriptor: resolved.descriptor,
+            model: resolved.model,
+          });
         }
         machine.transition({ type: "context.prepared", cycle });
         await checkpoint("context.prepared");
@@ -289,6 +316,7 @@ export class ApplicationRunner {
             const estimate = await this.#dependencies.estimateModelCall({
               request,
               descriptor: resolved.descriptor,
+              model: resolved.model,
               cycle,
               attempt,
               signal,

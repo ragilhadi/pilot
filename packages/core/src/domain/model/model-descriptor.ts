@@ -15,6 +15,17 @@ export const ModelCapabilitiesSchema = z
     systemMessages: z.boolean(),
     maxContextTokens: z.number().int().positive().optional(),
     maxOutputTokens: z.number().int().positive().optional(),
+    /**
+     * What the provider's reported prompt-token count actually measures.
+     *
+     * - `exact` — the size of the prompt, so it can drive the context-occupancy display.
+     * - `eval-only` — only the tokens the runner evaluated. Ollama reports `prompt_eval_count`
+     *   here, which collapses once the KV cache holds the conversation prefix, so the figure is a
+     *   throughput measure and must never be shown as context occupancy.
+     * - `unknown` — unclassified; treated as `eval-only` for display, since assuming the number is
+     *   a prompt size is the failure that shows a shrinking context on a growing conversation.
+     */
+    promptUsageTrust: z.enum(["exact", "eval-only", "unknown"]).optional(),
   })
   .strict()
   .superRefine((capabilities, context) => {

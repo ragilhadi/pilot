@@ -1,18 +1,18 @@
 import {
+  type AgentMessage,
   parseAgentMessage,
   parseModelDescriptor,
   parseModelRequest,
   runId,
   sessionId,
   toolCallId,
-  type AgentMessage,
 } from "@pilotrun/core";
 import { describe, expect, it } from "vitest";
 import {
   ContextEngine,
+  type ContextSource,
   ConversationModelRequestContextPreparer,
   PromptComposer,
-  type ContextSource,
 } from "../src/index.js";
 
 const fixtureEstimator = {
@@ -206,6 +206,7 @@ describe("PromptComposer", () => {
             "conversation": 4,
             "instructions": 3,
           },
+          "toolDefinitionTokens": 0,
         },
       }
     `);
@@ -254,28 +255,99 @@ describe("ConversationModelRequestContextPreparer", () => {
       signal: new AbortController().signal,
     });
 
-    expect(composition.request.messages.map(({ id }) => id)).toEqual(["message-4", "message-5"]);
+    // A request with no tools reserves nothing for them. This used to reserve a token for the
+    // two-character string "[]", which is a small error but the same error that, with real tools,
+    // priced `outputSchema` bytes that never cross the wire.
+    expect(composition.request.messages.map(({ id }) => id)).toEqual([
+      "message-3",
+      "message-4",
+      "message-5",
+    ]);
     expect(composition.snapshot).toMatchObject({
       budget: {
         configuredContextTokens: 35,
         modelContextTokens: 40,
         effectiveContextTokens: 35,
         reservedOutputTokens: 5,
-        reservedInputTokens: 1,
-        availableCandidateTokens: 29,
+        reservedInputTokens: 0,
+        availableCandidateTokens: 30,
       },
-      selectedTokens: 20,
-      remainingTokens: 9,
+      selectedTokens: 30,
+      remainingTokens: 0,
+      toolDefinitionTokens: 0,
       selected: [
+        { reference: "message-3", mandatory: false },
         { reference: "message-4", mandatory: true },
         { reference: "message-5", mandatory: true },
       ],
       excluded: [
-        { reference: "message-3", reason: "total-budget-exhausted" },
         { reference: "message-2", reason: "total-budget-exhausted" },
         { reference: "message-1", reason: "total-budget-exhausted" },
       ],
     });
+  });
+
+  it("reserves context for the tool schemas that ride along with every request", async () => {
+    const preparer = new ConversationModelRequestContextPreparer({
+      configuredContextTokens: 4_000,
+      reservedOutputTokens: 5,
+      tokenEstimator: fixtureEstimator,
+      now: () => "2026-07-22T00:01:00.000Z",
+    });
+    const descriptor = parseModelDescriptor({
+      key: "fake/test",
+      displayName: "Fake",
+      capabilities: {
+        streaming: true,
+        nativeToolCalling: true,
+        parallelToolCalls: false,
+        structuredOutput: false,
+        vision: false,
+        promptCaching: true,
+        reasoning: false,
+        configurableReasoningEffort: false,
+        systemMessages: true,
+      },
+    });
+    const prepare = async (tools: readonly unknown[]) =>
+      preparer.prepare({
+        request: parseModelRequest({
+          messages: [userMessage("message-1", "hello", 1)],
+          tools,
+          maxOutputTokens: 5,
+        }),
+        descriptor,
+        runId: runId("run-tools"),
+        cycle: 1,
+        signal: new AbortController().signal,
+      });
+
+    const withoutTools = await prepare([]);
+    const withTools = await prepare([
+      {
+        name: "read_file",
+        description: "Read a file from the workspace and return its contents.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string", description: "Workspace-relative path to read." },
+            offset: { type: "number", description: "First line to return." },
+          },
+          required: ["path"],
+        },
+        // Never sent to the provider, so it must not be charged against the window.
+        outputSchema: { type: "object", properties: { content: { type: "string" } } },
+      },
+    ]);
+
+    expect(withoutTools.snapshot.toolDefinitionTokens).toBe(0);
+    expect(withTools.snapshot.toolDefinitionTokens).toBeGreaterThan(30);
+    expect(withTools.snapshot.budget.reservedInputTokens).toBe(
+      withTools.snapshot.toolDefinitionTokens,
+    );
+    expect(withTools.snapshot.budget.availableCandidateTokens).toBeLessThan(
+      withoutTools.snapshot.budget.availableCandidateTokens,
+    );
   });
 
   it("drops an older tool exchange whole instead of splitting it, keeping the current one", async () => {

@@ -74,6 +74,10 @@ export function createModelCatalog(dependencies: ModelCatalogDependencies): Mode
           configurableReasoningEffort: false,
           systemMessages: true,
           maxContextTokens: 128_000,
+          // Ollama's /v1 shim reports `prompt_eval_count` as `prompt_tokens`, which counts only the
+          // tokens the runner evaluated. Once the KV cache holds the conversation prefix it falls
+          // well below the real prompt size, so it is throughput data, not context occupancy.
+          promptUsageTrust: "eval-only",
         }),
         ...(dependencies.fetch === undefined ? {} : { fetch: dependencies.fetch }),
       }),
@@ -178,6 +182,9 @@ function persistedModelCapabilities(model: PersistedModel) {
     reasoning: false,
     configurableReasoningEffort: false,
     systemMessages: true,
+    // User-added models are reached through the same Ollama-compatible endpoint by default, so the
+    // same caveat about `prompt_eval_count` applies until a model declares otherwise.
+    promptUsageTrust: "eval-only",
     ...(model.contextWindow === undefined ? {} : { maxContextTokens: model.contextWindow }),
   });
 }

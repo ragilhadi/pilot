@@ -1,15 +1,16 @@
 export {
-  OpenAICompatibleLanguageModel,
+  type EnvironmentReader,
+  processEnvironmentReader,
+  resolveBearerToken,
+} from "./credentials.js";
+export {
   type Fetch,
+  OpenAICompatibleLanguageModel,
   type OpenAICompatibleLanguageModelOptions,
 } from "./openai-compatible-language-model.js";
 export {
-  processEnvironmentReader,
-  resolveBearerToken,
-  type EnvironmentReader,
-} from "./credentials.js";
-export {
   createChatCompletionsRequest,
+  describeChatCompletionsPayload,
   type OpenAIChatCompletionsRequest,
 } from "./request.js";
 export {

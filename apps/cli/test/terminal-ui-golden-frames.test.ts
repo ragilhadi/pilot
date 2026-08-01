@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { summarizeToolCall } from "../src/tui/components/screen.js";
 import { activityIndicator } from "../src/tui/render-helpers.js";
 import { PilotFooter, PilotScreen } from "../src/tui/terminal-chat-presentation.js";
-import { type TerminalUiState, initialTerminalUiState } from "../src/tui/terminal-ui-state.js";
+import { initialTerminalUiState, type TerminalUiState } from "../src/tui/terminal-ui-state.js";
 import { createPilotTheme, pilotThemeModes } from "../src/tui/theme.js";
 
 const capabilities = {
@@ -67,19 +67,42 @@ describe("terminal UI golden frames", () => {
 
   it.each([
     {
-      name: "as a fraction of the model's context window",
-      usage: { inputTokens: 38_400, outputTokens: 1_200, contextWindowTokens: 128_000 },
+      name: "as a fraction of the effective context window",
+      usage: {
+        contextTokens: 38_400,
+        contextConfidence: "exact" as const,
+        outputTokens: 1_200,
+        contextWindowTokens: 128_000,
+      },
       expected: "ctx 38k/128k (30%)",
     },
     {
       name: "without a denominator when the window is unknown",
-      usage: { inputTokens: 38_400 },
+      usage: { contextTokens: 38_400, contextConfidence: "exact" as const },
       expected: "ctx 38k",
     },
     {
-      name: "marked with ~ when the figure is Pilot's own estimate",
-      usage: { inputTokens: 38_400, contextWindowTokens: 128_000, estimated: true },
+      name: "marked with ~ when the count is a heuristic",
+      usage: {
+        contextTokens: 38_400,
+        contextConfidence: "heuristic" as const,
+        contextWindowTokens: 128_000,
+      },
       expected: "ctx ~38k/128k (30%)",
+    },
+    {
+      name: "marked with the calibrated sign when a heuristic has been corrected",
+      usage: {
+        contextTokens: 38_400,
+        contextConfidence: "calibrated" as const,
+        contextWindowTokens: 128_000,
+      },
+      expected: "ctx \u224838k/128k (30%)",
+    },
+    {
+      name: "not at all when only the provider's billed prompt tokens are known",
+      usage: { inputTokens: 38_400, contextWindowTokens: 128_000 },
+      expected: "ready",
     },
   ])("renders context usage $name", ({ usage, expected }) => {
     const theme = createPilotTheme(capabilities, "dark");
