@@ -9,7 +9,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { InstructionDiscovery, runtimeVersion } from "@pilotrun/agent-runtime";
-import { builtinLanguageServers } from "@pilotrun/lsp";
+import { builtinLanguageServers, resolveExecutable } from "@pilotrun/lsp";
 import {
   createSqliteRepositories,
   SqliteCrashRecovery,
@@ -397,17 +397,14 @@ async function probeLanguageServers(): Promise<readonly LanguageServerDiagnostic
   );
 }
 
+/**
+ * Reports whether a command can be executed, by resolving it against PATH the way the OS loader
+ * would. This deliberately spawns nothing: running each candidate with `--version` needed
+ * `shell: true` on Windows to find `.cmd` shims, and passing an argument array alongside it is
+ * what Node deprecated in DEP0190 — the warning printed on every `pilot chat` startup.
+ */
 async function commandExists(command: string): Promise<boolean> {
-  try {
-    await execFileAsync(command, ["--version"], {
-      timeout: 5_000,
-      windowsHide: true,
-      shell: process.platform === "win32",
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return (await resolveExecutable(command)) !== undefined;
 }
 
 async function probeCommand(kind: "git" | "shell"): Promise<boolean> {

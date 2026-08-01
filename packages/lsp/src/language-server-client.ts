@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { PilotError, type WorkspaceDiagnostic } from "@pilotrun/core";
+import { resolveInvocation } from "./executable-lookup.js";
 import {
   encodeMessage,
   isNotification,
@@ -87,19 +88,24 @@ export class LanguageServerClient {
     this.#spawnProcess =
       options.spawnProcess ??
       (async () => {
-        // A project may install its own server binary; only fall back to a PATH lookup (which on
-        // Windows needs a shell to find the .cmd shim) when it has not.
+        // A project may install its own server binary; only fall back to a PATH lookup when it
+        // has not.
         const resolved = await options.definition.resolveCommand?.(
           options.rootPath,
           options.workspaceRoot ?? options.rootPath,
         );
-        const command = resolved?.command ?? options.definition.command;
-        const args = resolved?.args ?? options.definition.args;
-        return spawn(command, [...args], {
+        const invocation = await resolveInvocation(
+          resolved?.command ?? options.definition.command,
+          resolved?.args ?? options.definition.args,
+        );
+        return spawn(invocation.executable, [...invocation.args], {
           cwd: options.rootPath,
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
-          shell: resolved === undefined && process.platform === "win32",
+          shell: false,
+          ...(invocation.windowsVerbatimArguments === true
+            ? { windowsVerbatimArguments: true }
+            : {}),
         }) as ChildProcessWithoutNullStreams;
       });
   }

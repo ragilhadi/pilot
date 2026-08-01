@@ -29,3 +29,9 @@ export {
   LspDiagnosticsService,
   type LspDiagnosticsServiceOptions,
 } from "./lsp-diagnostics-service.js";
+export {
+  clearExecutableCache,
+  resolveExecutable,
+  resolveInvocation,
+  type ProcessInvocation,
+} from "./executable-lookup.js";
