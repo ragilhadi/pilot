@@ -1,15 +1,21 @@
 /**
- * `tui` is the inline renderer and the default: finished output goes to the terminal's scrollback
- * and only a bounded live region is redrawn, so native scrolling reaches the whole session and it
- * survives Pilot exiting. `fullscreen` is an app-like pane on the alternate screen — a pinned
- * banner and composer with a transcript Pilot scrolls itself. It redraws freely because the
- * alternate screen keeps those redraws away from the shell's scrollback, but the transcript ends
- * with the session rather than staying in the terminal.
+ * `tui` is the default and means the full-screen renderer: an app-like pane on the alternate
+ * screen, with a pinned banner and composer and a transcript Pilot scrolls itself. It redraws
+ * freely because the alternate screen keeps those redraws away from the shell's scrollback, and
+ * scrolling back through the session is `PgUp`/`PgDn`, `Shift+Up`/`Shift+Down`, or the wheel.
+ *
+ * `inline` is the renderer that hands scrolling to the terminal instead: finished output is
+ * committed to the terminal's own scrollback and only a bounded live region is redrawn, so the
+ * transcript survives Pilot exiting. It is the mode to pick when the transcript needs to stay in
+ * the terminal afterwards; the cost is that the layout is a growing log rather than a pane.
+ *
+ * `fullscreen` is kept as an explicit spelling of the default so the flag that selected it in
+ * 0.0.19 keeps working.
  */
-export const presentationModes = ["auto", "tui", "fullscreen", "plain"] as const;
+export const presentationModes = ["auto", "tui", "fullscreen", "inline", "plain"] as const;
 
 export type PresentationMode = (typeof presentationModes)[number];
-export type ResolvedPresentationMode = Exclude<PresentationMode, "auto"> | "json";
+export type ResolvedPresentationMode = "fullscreen" | "inline" | "plain" | "json";
 
 export interface TerminalCapabilitySnapshot {
   readonly interactiveInput: boolean;
@@ -39,15 +45,15 @@ export function resolvePresentationMode(
   if (selection.json) return "json";
   if (selection.screenReader) return "plain";
   if (selection.requested === "plain") return "plain";
-  if (selection.requested === "tui" || selection.requested === "fullscreen") {
+  if (selection.requested !== "auto") {
     if (!supportsTui(selection.capabilities)) {
       throw new Error(
         `TUI mode is unavailable: ${selection.capabilities.reason ?? "the terminal is not interactive"}. Use --ui plain.`,
       );
     }
-    return selection.requested;
+    return selection.requested === "inline" ? "inline" : "fullscreen";
   }
-  return supportsTui(selection.capabilities) ? "tui" : "plain";
+  return supportsTui(selection.capabilities) ? "fullscreen" : "plain";
 }
 
 function supportsTui(capabilities: TerminalCapabilitySnapshot): boolean {

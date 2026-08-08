@@ -64,17 +64,21 @@ export interface TerminalChatPresentationOptions {
   /** Frame interval for the activity animation, in milliseconds. */
   readonly activityIntervalMs?: number;
   /**
-   * `inline` (default) commits finished output to the terminal's scrollback and redraws only a
-   * bounded live region, so native scrolling reaches the session transcript and whatever was on
-   * screen before Pilot started. `fullscreen` lays the transcript out in a {@link ChatViewport}
-   * sized to the terminal and scrolls it itself; it expects the terminal to already be on the
-   * alternate screen buffer — see `FullscreenTerminal`.
+   * `fullscreen` — what `pilot chat` selects for a capable terminal — lays the transcript out in a
+   * {@link ChatViewport} sized to the terminal and scrolls it itself; it expects the terminal to
+   * already be on the alternate screen buffer, see `FullscreenTerminal`. `inline` commits finished
+   * output to the terminal's scrollback and redraws only a bounded live region, so native scrolling
+   * reaches the session transcript and whatever was on screen before Pilot started.
+   *
+   * Defaults to `inline` here, not because it is the CLI default but because it is the mode that
+   * needs nothing of its terminal: constructing this class does not put anyone on the alternate
+   * screen unless the caller has arranged for it.
    */
   readonly renderMode?: TranscriptRenderMode;
 }
 
-/** Rows reserved below the permission dialog: the footer's two lines plus one composer line. */
-export const permissionDialogBottomMargin = 3;
+/** Rows reserved below the permission dialog: the footer's status line plus one composer line. */
+export const permissionDialogBottomMargin = 2;
 
 export interface ModelDisplayState {
   readonly key: string;
@@ -248,11 +252,11 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
   /**
    * Rows the transcript part of the live region may use.
    *
-   * The region's budget less the footer's two lines and a line for the composer, so the whole thing
-   * fits on screen and never scrolls.
+   * The region's budget less the footer's status line and a line for the composer, so the whole
+   * thing fits on screen and never scrolls.
    */
   #transcriptRowBudget(): number {
-    return Math.max(1, liveRegionRowBudget(this.#terminal.rows) - 3);
+    return Math.max(1, liveRegionRowBudget(this.#terminal.rows) - 2);
   }
 
   /**
@@ -483,6 +487,13 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
     if (matchesKey(data, Key.pageDown)) return this.#scroll(() => viewport.scrollPages(1));
     if (matchesKey(data, Key.shift("up"))) return this.#scroll(() => viewport.scrollLines(-1));
     if (matchesKey(data, Key.shift("down"))) return this.#scroll(() => viewport.scrollLines(1));
+    // Home and End are the transcript's ends, not the composer's: the editor already binds Ctrl+A
+    // and Ctrl+E for the line, and a scrolled-back reader wants one keystroke back to the newest
+    // output. Both are ignored while the composer holds text, where line movement is the intent.
+    if (this.#editor.getText().length === 0) {
+      if (matchesKey(data, Key.home)) return this.#scroll(() => viewport.scrollToTop());
+      if (matchesKey(data, Key.end)) return this.#scroll(() => viewport.scrollToBottom());
+    }
     // Escape already cancels a running turn; while idle and scrolled back it returns to the latest
     // output instead, which is the other thing "get me out of this view" should mean.
     if (
@@ -551,6 +562,7 @@ export class TerminalChatPresentation implements InteractiveChatPresentation {
           ? [
               "PgUp/PgDn    Scroll the transcript by a screenful",
               "Shift+Up/Dn  Scroll the transcript by a line (the wheel also works)",
+              "Home/End     Jump to the start of the session, or back to the newest output",
             ]
           : []),
         this.#renderMode === "fullscreen"

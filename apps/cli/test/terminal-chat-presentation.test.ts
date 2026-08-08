@@ -363,7 +363,7 @@ describe("terminal chat presentation", () => {
     await expect(response).resolves.toBe("deny once");
   });
 
-  it("hides broader permission scopes behind More options", async () => {
+  it("offers the session approval on the first list, one key from allow once", async () => {
     const terminal = new FakeTerminal();
     const presentation = new TerminalChatPresentation({
       terminal,
@@ -375,12 +375,12 @@ describe("terminal chat presentation", () => {
     const response = presentation.readLine();
     presentation.render(permissionEvent(factory));
 
+    // It used to be behind "More options...": Down, Down, Enter, then a second list.
     terminal.input("\u001b[B");
-    terminal.input("\u001b[B");
-    terminal.input("\r");
     terminal.input("\r");
 
     await expect(response).resolves.toBe("allow session");
+    expect(terminal.output).not.toContain("More options");
   });
 
   it("opens and scrolls the complete syntax-aware permission diff before returning safely", async () => {
@@ -948,7 +948,7 @@ describe("permission dialog readability", () => {
     await expect(response).resolves.toBe("allow once");
   });
 
-  it("spells out what each broader scope grants", async () => {
+  it("names the tool a session approval covers, so the breadth is not a guess", async () => {
     const terminal = new FakeTerminal();
     const presentation = new TerminalChatPresentation({
       terminal,
@@ -961,12 +961,14 @@ describe("permission dialog readability", () => {
     presentation.render(writeFileRequest(factory, "x"));
     await painted();
 
-    terminal.input("\u001b[B");
-    terminal.input("\u001b[B");
-    terminal.input("\r");
-    await painted();
-
-    expect(terminal.output).toContain("This same action, for the rest of this session");
+    // Every choice is on the first list; nothing has to be opened to read them.
+    expect(terminal.output).toContain("Allow once");
+    expect(terminal.output).toContain("Allow for this session");
+    expect(terminal.output).toContain("Any write_file until this session ends");
+    expect(terminal.output).toContain("Deny");
+    // The old wording claimed a session approval covered only "this same action", which is what
+    // made it useless — the next file was a different action and asked again.
+    expect(terminal.output).not.toContain("This same action, for the rest of this session");
     expect(terminal.output).not.toContain("Broader approval permitted by policy");
   });
 });

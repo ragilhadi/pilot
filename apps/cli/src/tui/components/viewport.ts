@@ -76,6 +76,12 @@ export class ChatViewport extends Container {
     this.#follow = true;
   }
 
+  /** Jumps to the oldest output, so the start of the session is one keystroke away. */
+  scrollToTop(): void {
+    this.#offset = 0;
+    this.#follow = this.#maximumOffset === 0;
+  }
+
   override render(width: number): string[] {
     const rows = Math.max(minimumRows, this.#rows());
     const banner = this.#screen.renderBanner(width);
@@ -113,7 +119,7 @@ export class ChatViewport extends Container {
     const unicode = this.#capabilities.unicode;
     const rule = unicode ? "─" : "-";
     const separator = unicode ? "·" : "-";
-    const label = ` ${hiddenBelow} more line${hiddenBelow === 1 ? "" : "s"} below ${separator} PgDn to follow `;
+    const label = ` ${hiddenBelow} more line${hiddenBelow === 1 ? "" : "s"} below ${separator} End to follow `;
     const padding = Math.max(0, width - label.length - 2);
     return truncateToWidth(
       this.#theme.muted(`${rule.repeat(2)}${label}${rule.repeat(padding)}`),

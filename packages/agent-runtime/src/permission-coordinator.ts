@@ -136,35 +136,51 @@ export class PermissionCoordinator {
   }
 }
 
+/**
+ * What the user is offered: approve this call, or approve for the rest of the session.
+ *
+ * The list used to run to six. `exact-action`, `workspace`, and `application` all outlive the
+ * session — some of them outlive the process — which is a durable grant to make from a prompt the
+ * user is trying to get past, and three of the six differed only in wording. Two choices is the
+ * whole decision: now, or until I stop working.
+ *
+ * The domain vocabulary still carries the wider kinds; nothing offers them.
+ */
 function availableScopesFor(
-  action: PermissionAction,
+  _action: PermissionAction,
   context: PermissionEvaluationContext,
 ): readonly PermissionApprovalScopeKind[] {
   return Object.freeze([
     "once",
-    "exact-action",
     ...(context.sessionId === undefined ? [] : (["session"] as const)),
-    ...(action.kind === "tool" ? (["tool"] as const) : []),
-    ...(context.workspaceId === undefined ? [] : (["workspace"] as const)),
-    ...(context.applicationId === undefined ? [] : (["application"] as const)),
   ]);
 }
 
 /**
  * Chooses what an approval covers, independently of how long it lasts.
  *
- * A scope answers "until when" — this call, this session, this workspace. It must never answer
- * "which actions": pairing a scope with an `any` matcher turned "allow for session" into a blanket
- * approval of every later tool call in that session, so approving one `npm run build` silently
- * pre-authorized an unrelated `curl`. Every scope except `tool` therefore binds to the exact action
- * the user reviewed, identified by its fingerprint.
+ * A scope answers "until when"; the matcher answers "which actions". Pairing a scope with an `any`
+ * matcher once turned "allow for session" into a blanket approval of every later tool call in that
+ * session, so approving one `npm run build` silently pre-authorized an unrelated `curl`. The fix
+ * then was to bind every scope to the exact action the user reviewed, by fingerprint.
+ *
+ * That was too tight to be usable for a **tool**. A tool's fingerprint covers its input, so every
+ * `write_file` to a different path — or the same path with different content — is a different
+ * action, and "for the rest of this session" bought the user exactly one silent call. A session
+ * approval of a tool therefore matches the tool by name: approving `write_file` approves
+ * `write_file`, for this session, and nothing else. It is still not `any` — it does not reach
+ * `edit`, `apply_patch`, or a command — and writes remain confined to the workspace boundary.
+ *
+ * **Commands** keep the fingerprint. `run_command` carries its whole command line in the action, so
+ * matching anything looser than the exact action would turn one approved `npm test` into standing
+ * approval for every command that followed it.
  */
 function matcherFor(
   kind: PermissionApprovalScopeKind,
   action: PermissionAction,
   decision: PermissionDecision,
 ): PermissionRuleMatcher {
-  if (kind === "tool" && action.kind === "tool") {
+  if ((kind === "tool" || kind === "session") && action.kind === "tool") {
     return { kind: "tool", toolName: action.toolName };
   }
   return { kind: "exact-action", fingerprint: decision.actionFingerprint };

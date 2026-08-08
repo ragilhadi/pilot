@@ -616,7 +616,7 @@ describe("pilot chat", () => {
       new AbortController().signal,
       timedLines([
         { line: "Write approved.txt" },
-        { line: "allow workspace", delayMs: 250 },
+        { line: "allow session", delayMs: 250 },
         { line: "/exit", delayMs: 300 },
       ]),
       undefined,
@@ -630,6 +630,73 @@ describe("pilot chat", () => {
     expect(stdout.text()).toContain("Write approved");
     expect(stderr.text()).toBe("");
     expect(execute).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * The complaint this scope change came from: approving a write "for the session" bound the rule
+   * to that action's fingerprint, and a fingerprint covers the input — so the very next file was a
+   * different action and prompted again. One approval now covers the tool for the session.
+   */
+  it("stops asking for later writes once the write tool is approved for the session", async () => {
+    const execute = vi.fn(async ({ path }: { readonly path: string }) => ({
+      output: { changed: path },
+    }));
+    const writeFileTool = defineTool({
+      name: "write_file",
+      description: "Write a test file",
+      inputSchema: z.object({ path: z.string() }).strict().readonly(),
+      outputSchema: z.object({ changed: z.string() }).strict().readonly(),
+      metadata: {
+        risk: "workspace-write",
+        concurrency: "exclusive",
+        timeoutMs: 1_000,
+        maxOutputBytes: 10_000,
+        requiredPermissions: ["workspace.write"],
+      },
+      execute,
+    });
+    const model = new FakeLanguageModel({
+      providerId: "fake",
+      modelId: "approval",
+      scripts: [
+        toolCallScript({
+          responseId: "response-first",
+          callId: "call-first",
+          toolName: "write_file",
+          argumentDeltas: ['{"path":"first.txt"}'],
+          completedInput: { path: "first.txt" },
+        }),
+        toolCallScript({
+          responseId: "response-second",
+          callId: "call-second",
+          toolName: "write_file",
+          // A different file, so a different fingerprint from the one that was approved.
+          argumentDeltas: ['{"path":"second.txt"}'],
+          completedInput: { path: "second.txt" },
+        }),
+        textResponseScript({ responseId: "response-final", deltas: ["Both files written"] }),
+      ],
+    });
+    const { dependencies, stdout, stderr } = cliDependencies(
+      new ModelRegistry([{ model, displayName: "Approval Fake" }]),
+      new AbortController().signal,
+      timedLines([
+        { line: "Write both files" },
+        { line: "allow session", delayMs: 250 },
+        { line: "/exit", delayMs: 600 },
+      ]),
+      undefined,
+      new ToolRegistry([writeFileTool]),
+    );
+
+    expect(await runCli(["chat", "--model", "fake/approval"], dependencies)).toBe(0);
+
+    const prompts = stdout.text().split("[approval required: write_file").length - 1;
+    expect(prompts).toBe(1);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls.map(([input]) => input.path)).toEqual(["first.txt", "second.txt"]);
+    expect(stdout.text()).toContain("Both files written");
+    expect(stderr.text()).toBe("");
   });
 
   it("previews and atomically applies a real approved workspace patch", async () => {

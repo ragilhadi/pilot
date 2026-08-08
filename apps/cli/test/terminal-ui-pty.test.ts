@@ -17,7 +17,7 @@ const disableMouseReporting = "\u001b[?1000l";
  * Typing `/exit` opens a confirmation, so the session ends only after answering it.
  */
 async function runChatSession(
-  ui: "tui" | "fullscreen",
+  ui: "auto" | "tui" | "fullscreen" | "inline",
   environment: Readonly<Record<string, string>> = {},
 ): Promise<{ readonly output: string; readonly exitCode: number }> {
   const dataDirectory = await mkdtemp(path.join(tmpdir(), "pilot-pty-"));
@@ -77,11 +77,18 @@ describe("packaged terminal UI in a pseudo-terminal", () => {
     expect(output).toContain("\u001b[?2004l");
   }, 15_000);
 
-  it("keeps the default inline layout off the alternate screen", async () => {
-    const { output } = await runChatSession("tui");
+  it("keeps the opt-in inline layout off the alternate screen", async () => {
+    const { output } = await runChatSession("inline");
 
     expect(output).not.toContain(enterAlternateScreen);
     expect(output).not.toContain(enableMouseReporting);
+  }, 15_000);
+
+  it("gives a capable terminal the full-screen layout without being asked", async () => {
+    const { output, exitCode } = await runChatSession("auto");
+
+    expect(exitCode).toBe(0);
+    expect(output).toContain(enterAlternateScreen);
   }, 15_000);
 
   it("draws fullscreen on the alternate screen and hands the shell back on exit", async () => {

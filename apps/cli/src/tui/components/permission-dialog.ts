@@ -17,19 +17,21 @@ import {
 } from "./permission-summary.js";
 
 /**
- * What each broader scope actually grants.
+ * What a session approval actually grants, in the words of the thing being approved.
  *
- * These are deliberately concrete. "Broader approval permitted by policy" told the user nothing
- * about breadth or duration, which matters: every scope below is bound to this exact action, and
- * only differs in how long the approval survives.
+ * A tool is approved by name — "don't ask again" is about the *next* file, and every write has a
+ * different fingerprint — so the label names the tool. A command is approved as itself, because
+ * `run_command` carries its whole command line and anything looser would approve the next command
+ * too. The label has to say which of the two this is, or the user cannot tell what they granted.
  */
-const scopeDescriptions: Readonly<Record<PermissionApprovalScopeKind, string>> = Object.freeze({
-  once: "Just this call",
-  "exact-action": "This same action, whenever it recurs",
-  session: "This same action, for the rest of this session",
-  tool: "Any use of this tool, for the rest of this session",
-  workspace: "This same action, anywhere in this workspace",
-  application: "This same action, everywhere Pilot runs",
+function sessionScopeDescription(action: PermissionApprovalRequest["action"]): string {
+  return action.kind === "tool"
+    ? `Any ${action.toolName} until this session ends`
+    : "This same command until this session ends";
+}
+
+const scopeLabels: Readonly<Partial<Record<PermissionApprovalScopeKind, string>>> = Object.freeze({
+  session: "Allow for this session",
 });
 
 export class PermissionDialog implements Component {
@@ -39,7 +41,7 @@ export class PermissionDialog implements Component {
   readonly #preview: PermissionPreview | undefined;
   readonly #rows: number;
   #list: SelectList;
-  #mode: "decision" | "preview" | "more" = "decision";
+  #mode: "decision" | "preview" = "decision";
   #previewOffset = 0;
   onResponse?: (response: string) => void;
   onCancel?: () => void;
@@ -58,47 +60,32 @@ export class PermissionDialog implements Component {
     this.#showDecisionList();
   }
 
+  /**
+   * Every choice on one list.
+   *
+   * The broader scopes used to live behind a "More options..." submenu, which made the one people
+   * actually want — stop asking me for the rest of this session — two keystrokes and a guess away,
+   * while the prompt it was trying to escape reappeared on the very next file.
+   */
   #showDecisionList(): void {
     this.#mode = "decision";
     const items: SelectItem[] = [
       { value: "allow once", label: "Allow once", description: "Approve only this action" },
-      { value: "deny once", label: "Deny", description: "Do not run this action" },
-      ...(this.#request.availableScopes.some((scope) => scope !== "once")
-        ? [
-            {
-              value: "more",
-              label: "More options...",
-              description: "Approve for longer than this one call",
-            },
-          ]
-        : []),
-    ];
-    this.#list = new SelectList(items, 8, this.#theme.select);
-    this.#list.onSelect = (item) => {
-      if (item.value === "more") this.#showMoreList();
-      else this.onResponse?.(item.value);
-    };
-    this.#list.onCancel = () => this.onCancel?.();
-  }
-
-  #showMoreList(): void {
-    this.#mode = "more";
-    const items: SelectItem[] = [
       ...this.#request.availableScopes
         .filter((scope) => scope !== "once")
         .map((scope) => ({
           value: `allow ${scope}`,
-          label: `Allow for ${scope}`,
-          description: scopeDescriptions[scope],
+          label: scopeLabels[scope] ?? `Allow for ${scope}`,
+          description:
+            scope === "session"
+              ? sessionScopeDescription(this.#request.action)
+              : `Approve for ${scope}`,
         })),
-      { value: "back", label: "Back", description: "Return without approving" },
+      { value: "deny once", label: "Deny", description: "Do not run this action" },
     ];
     this.#list = new SelectList(items, 8, this.#theme.select);
-    this.#list.onSelect = (item) => {
-      if (item.value === "back") this.#showDecisionList();
-      else this.onResponse?.(item.value);
-    };
-    this.#list.onCancel = () => this.#showDecisionList();
+    this.#list.onSelect = (item) => this.onResponse?.(item.value);
+    this.#list.onCancel = () => this.onCancel?.();
   }
 
   invalidate(): void {
@@ -155,9 +142,7 @@ export class PermissionDialog implements Component {
         "",
         ...this.#list.render(innerWidth),
         "",
-        this.#theme.muted(
-          this.#mode === "more" ? "Enter confirm  Esc back" : "Enter confirm  Esc deny",
-        ),
+        this.#theme.muted("Enter confirm  Esc deny"),
       ],
       width,
     );

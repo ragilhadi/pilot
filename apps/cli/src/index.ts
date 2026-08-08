@@ -374,7 +374,7 @@ function shouldUseTui(
       screenReader: args.includes("--screen-reader"),
       capabilities,
     });
-    if (resolved === "tui") return "inline";
+    if (resolved === "inline") return "inline";
     if (resolved === "fullscreen") return "fullscreen";
     return undefined;
   } catch {

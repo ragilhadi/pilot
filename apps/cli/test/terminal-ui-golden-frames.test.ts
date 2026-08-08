@@ -234,6 +234,61 @@ describe("terminal UI golden frames", () => {
     expect(idle).not.toContain("Thinking");
   });
 
+  it("spends one line on the status bar and only advertises the keys you cannot guess", () => {
+    const theme = createPilotTheme(capabilities);
+    const footer = new PilotFooter(() => goldenState, theme, capabilities).render(100);
+
+    // The composer already draws a rule along its bottom edge; a second one here separated nothing.
+    expect(footer).toHaveLength(1);
+    const line = footer.join("");
+    expect(line).toContain("? help");
+    expect(line).toContain("Esc cancel");
+    expect(line).toContain("Ctrl+C exit");
+    // Discoverable by trying, and shown in full by `?`.
+    expect(line).not.toContain("Enter send");
+    expect(line).not.toContain("Ctrl+J");
+    expect(line).not.toContain("Ctrl+Y");
+  });
+
+  it("keeps the status bar within a narrow terminal", () => {
+    const theme = createPilotTheme(capabilities);
+    for (const width of [30, 40, 60, 100]) {
+      const footer = new PilotFooter(() => goldenState, theme, {
+        ...capabilities,
+        columns: width,
+      }).render(width);
+      expect(footer).toHaveLength(1);
+      expect(visibleWidth(footer[0] ?? "")).toBeLessThanOrEqual(width);
+    }
+  });
+
+  it("renders assistant reasoning without being asked", () => {
+    const theme = createPilotTheme(capabilities);
+    const frame = new PilotScreen(
+      () => ({
+        ...goldenState,
+        blocks: [
+          {
+            kind: "assistant",
+            id: "assistant:default-reasoning",
+            responseId: "response:default-reasoning",
+            text: "The answer is 42.",
+            reasoning: "First I consider the constraints, then I derive the result.",
+            status: "completed",
+          },
+        ],
+      }),
+      theme,
+      capabilities,
+      "C:/workspace/pilot",
+    )
+      .render(100)
+      .join("\n");
+
+    expect(frame).toContain("thinking");
+    expect(frame).toContain("derive the result");
+  });
+
   it("renders assistant reasoning only when thinking is toggled on", () => {
     const state: TerminalUiState = {
       ...goldenState,

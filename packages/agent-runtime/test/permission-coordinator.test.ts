@@ -77,14 +77,8 @@ describe("PermissionCoordinator", () => {
       signal: signal(),
     });
     await vi.waitFor(() => expect(requestPermission).toHaveBeenCalledOnce());
-    expect(requestPermission.mock.calls[0]?.[0].availableScopes).toEqual([
-      "once",
-      "exact-action",
-      "session",
-      "tool",
-      "workspace",
-      "application",
-    ]);
+    // Two choices, not six: now, or until I stop working.
+    expect(requestPermission.mock.calls[0]?.[0].availableScopes).toEqual(["once", "session"]);
     resolveApproval?.({ effect: "allow", scope: "session" });
 
     await expect(pending).resolves.toMatchObject({
@@ -195,35 +189,42 @@ describe("PermissionCoordinator approval breadth", () => {
     return { policy, coordinator };
   }
 
-  // A scope says how long an approval lasts, never what it covers. Pairing one with an `any`
-  // matcher turned "allow for session" into a blanket approval of every later tool call, so
-  // approving one npm build silently pre-authorized an unrelated network command.
-  it.each(["session", "workspace", "application", "exact-action", "once"])(
-    "keeps a %s approval bound to the reviewed action",
-    async (scope) => {
-      const { policy, coordinator } = coordinatorAllowing(scope);
-      const approved = await coordinator.authorize({
-        action: action(),
-        context: context(),
-        signal: new AbortController().signal,
-      });
-      expect(approved.effect).toBe("allow");
+  const curl = PermissionActionSchema.parse({
+    kind: "command",
+    executable: "curl",
+    args: ["https://example.test", "-o", "out"],
+    cwd: ".",
+    environment: {},
+    risk: "network",
+    requiredPermissions: ["process.execute", "network.access"],
+  });
 
-      const unrelated = policy.evaluate({
-        action: PermissionActionSchema.parse({
-          kind: "command",
-          executable: "curl",
-          args: ["https://example.test", "-o", "out"],
-          cwd: ".",
-          environment: {},
-          risk: "network",
-          requiredPermissions: ["process.execute", "network.access"],
-        }),
-        context: context("call-2"),
-      });
-      expect(unrelated.effect).toBe("ask");
-    },
-  );
+  // A scope says how long an approval lasts. It must never become "and everything else too":
+  // pairing one with an `any` matcher turned "allow for session" into a blanket approval of every
+  // later tool call, so approving one npm build silently pre-authorized an unrelated network
+  // command.
+  it.each(["session", "once"])("keeps a %s approval away from unrelated actions", async (scope) => {
+    const { policy, coordinator } = coordinatorAllowing(scope);
+    const approved = await coordinator.authorize({
+      action: action(),
+      context: context(),
+      signal: new AbortController().signal,
+    });
+    expect(approved.effect).toBe("allow");
+
+    expect(policy.evaluate({ action: curl, context: context("call-2") }).effect).toBe("ask");
+    // A different tool is a different decision, however long the approval lasts.
+    const differentTool = PermissionActionSchema.parse({
+      kind: "tool",
+      toolName: "apply_patch",
+      risk: "workspace-write",
+      requiredPermissions: ["workspace.write"],
+      input: { path: "notes.txt", patch: "*** Begin Patch" },
+    });
+    expect(policy.evaluate({ action: differentTool, context: context("call-3") }).effect).toBe(
+      "ask",
+    );
+  });
 
   it("re-allows the identical action for the rest of the session", async () => {
     const { policy, coordinator } = coordinatorAllowing("session");
@@ -233,6 +234,56 @@ describe("PermissionCoordinator approval breadth", () => {
       signal: new AbortController().signal,
     });
     expect(policy.evaluate({ action: action(), context: context("call-2") }).effect).toBe("allow");
+  });
+
+  /**
+   * The point of the whole change: a tool's fingerprint covers its input, so binding a session
+   * approval to the fingerprint bought exactly one silent call and asked again on the next file.
+   */
+  it("covers the same tool on a different file for the rest of the session", async () => {
+    const { policy, coordinator } = coordinatorAllowing("session");
+    await coordinator.authorize({
+      action: action(),
+      context: context(),
+      signal: new AbortController().signal,
+    });
+    const anotherFile = PermissionActionSchema.parse({
+      kind: "tool",
+      toolName: "write_file",
+      risk: "workspace-write",
+      requiredPermissions: ["workspace.write"],
+      input: { path: "a-completely-different-file.txt", content: "hello" },
+    });
+
+    expect(policy.evaluate({ action: anotherFile, context: context("call-2") }).effect).toBe(
+      "allow",
+    );
+  });
+
+  /**
+   * `run_command` carries its whole command line in the action, so a command approved for the
+   * session stays the command that was approved — otherwise one `npm test` would stand in for
+   * every command after it.
+   */
+  it("keeps a session-approved command bound to that command", async () => {
+    const { policy, coordinator } = coordinatorAllowing("session");
+    const npmTest = PermissionActionSchema.parse({
+      kind: "command",
+      executable: "npm",
+      args: ["test"],
+      cwd: ".",
+      environment: {},
+      risk: "unknown",
+      requiredPermissions: ["process.execute"],
+    });
+    await coordinator.authorize({
+      action: npmTest,
+      context: context(),
+      signal: new AbortController().signal,
+    });
+
+    expect(policy.evaluate({ action: npmTest, context: context("call-2") }).effect).toBe("allow");
+    expect(policy.evaluate({ action: curl, context: context("call-3") }).effect).toBe("ask");
   });
 
   it("does not carry a session approval into a different session", async () => {
@@ -249,22 +300,39 @@ describe("PermissionCoordinator approval breadth", () => {
     expect(elsewhere.effect).toBe("ask");
   });
 
-  it("still lets a tool-scoped approval cover the whole tool", async () => {
-    const { policy, coordinator } = coordinatorAllowing("tool");
+  it("still refuses a destructive action a session approval would otherwise cover", async () => {
+    const { policy, coordinator } = coordinatorAllowing("session");
     await coordinator.authorize({
       action: action(),
       context: context(),
       signal: new AbortController().signal,
     });
-    const otherInput = PermissionActionSchema.parse({
+    const destructive = PermissionActionSchema.parse({
       kind: "tool",
       toolName: "write_file",
-      risk: "workspace-write",
+      risk: "destructive",
       requiredPermissions: ["workspace.write"],
-      input: { path: "a-completely-different-file.txt" },
+      input: { path: "notes.txt" },
     });
-    expect(policy.evaluate({ action: otherInput, context: context("call-2") }).effect).toBe(
-      "allow",
+
+    // The built-in destructive boundary is a hard rule; no approval reaches past it.
+    expect(policy.evaluate({ action: destructive, context: context("call-2") }).effect).toBe(
+      "deny",
     );
   });
+
+  it.each(["workspace", "application", "exact-action", "tool"])(
+    "refuses a %s response now that it is never offered",
+    async (scope) => {
+      const { coordinator } = coordinatorAllowing(scope);
+
+      await expect(
+        coordinator.authorize({
+          action: action(),
+          context: context(),
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toMatchObject({ code: "PILOT_PERMISSION_RESPONSE_INVALID" });
+    },
+  );
 });
