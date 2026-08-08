@@ -8,8 +8,8 @@ settings:
 catalogs:
   default:
     '@earendil-works/pi-tui':
-      specifier: ^0.80.10
-      version: 0.80.10
+      specifier: ^0.83.0
+      version: 0.83.0
     node-pty:
       specifier: ^1.1.0
       version: 1.1.0
@@ -41,7 +41,7 @@ importers:
     dependencies:
       '@earendil-works/pi-tui':
         specifier: 'catalog:'
-        version: 0.80.10
+        version: 0.83.0
       '@pilotrun/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
@@ -205,8 +205,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@earendil-works/pi-tui@0.80.10':
-    resolution: {integrity: sha512-c2JO29PbhKPEQ6fgHQKAl0WhwuFqzWfzspMmP+8B5tpDuP+0mvarRbKKg8gq4b+pQx/QX+6aVS4ko7deoyjQjg==}
+  '@earendil-works/pi-tui@0.83.0':
+    resolution: {integrity: sha512-IoYrb0rORjELmEpNtoCA/U8je3KopMkRAVJRdSzvXRvgb+Huo1gNh8Q5CSZvNOiYtDxJdj2tYZZHZ4B3+IN3hA==}
     engines: {node: '>=22.19.0'}
 
   '@emnapi/core@1.11.1':
@@ -885,7 +885,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.5.7':
     optional: true
 
-  '@earendil-works/pi-tui@0.80.10':
+  '@earendil-works/pi-tui@0.83.0':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.5
