@@ -1,6 +1,6 @@
 {
   "name": "@pilotrun/core",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "description": "Provider-neutral domain types and ports for the Pilot coding-agent platform.",
   "license": "MIT",
   "publishConfig": {

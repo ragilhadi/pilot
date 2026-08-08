@@ -88,29 +88,35 @@ can also be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON` (a JSON array o
 `{ provider, modelId, displayName, capabilities }` entries; credentials must be environment-variable
 references, never raw keys).
 
-In an interactive terminal, `chat` renders inline (multiline editor, history, `/` and `@`
-completion, streaming Markdown, permission prompts). Finished output — your message, each settled
-tool call, each completed reply — is written to the terminal's own scrollback and never redrawn, so
-the scroll wheel, `Shift+PgUp`, and tmux copy-mode reach the whole session *and* whatever was on
-screen before Pilot started. Only a small live region at the bottom is repainted.
+In an interactive terminal, `chat` is a full-screen application (multiline editor, history, `/` and
+`@` completion, streaming Markdown, permission prompts). It draws on the alternate screen buffer,
+with the banner pinned to the top row and the composer and status line to the bottom, and the
+transcript scrolled between them by Pilot rather than by the terminal:
 
-Because committed output belongs to the terminal, it keeps the width it was written at: resizing
-does not reflow earlier output, the same way it does not reflow `git log`. Reflowing it would mean
-rewriting it, and rewriting it is what clears a scrollback.
+| | |
+|---|---|
+| `PgUp` / `PgDn` | scroll a screenful |
+| `Shift+Up` / `Shift+Down` | scroll a line |
+| mouse wheel | scroll three lines |
+| `Home` / `End` | jump to the start of the session, or back to the newest output |
+| prompt sent, `PgDn` past the end, `Esc` while idle | follow the newest output |
 
-`--ui fullscreen` is the other shape: an app-like pane on the alternate screen buffer, with the
-banner and composer pinned and the transcript scrolled by Pilot rather than the terminal — `PgUp`
-and `PgDn` by a screenful, `Shift+Up`/`Shift+Down` by a line, or the mouse wheel. A rule above the
-composer reports how many lines are still below whenever you have scrolled back; sending a prompt,
-paging past the end, or pressing `Esc` while idle returns to the newest output. Nothing it draws
-touches your shell's scrollback, which comes back untouched on exit — but the transcript ends with
-the session instead of staying in the terminal, which is the trade against the default.
+A rule above the composer reports how many lines are still below whenever you have scrolled back.
+Nothing Pilot draws touches your shell's scrollback, which comes back untouched on exit — the trade
+is that the transcript ends with the session instead of staying in the terminal.
 
-Because the wheel scrolls the transcript there, the terminal's own text selection needs `Shift`
-held down; set `PILOT_TUI_MOUSE=0` to keep selection unmodified and scroll by keyboard only.
+Because the wheel scrolls the transcript, the terminal's own text selection needs `Shift` held down;
+set `PILOT_TUI_MOUSE=0` to keep selection unmodified and scroll by keyboard only.
 
-Force a mode explicitly with `--ui tui` (inline, the default), `--ui fullscreen`, `--ui plain`,
-`--screen-reader`, or `--json`. Sessions and tool activity are stored in SQLite under
+`--ui inline` is the other shape, for when the transcript has to survive the session: finished
+output — your message, each settled tool call, each completed reply — is written to the terminal's
+own scrollback and never redrawn, so the scroll wheel, `Shift+PgUp`, and tmux copy-mode reach the
+whole session *and* whatever was on screen before Pilot started. Only a small live region at the
+bottom is repainted. Because committed output belongs to the terminal, it keeps the width it was
+written at: resizing does not reflow earlier output, the same way it does not reflow `git log`.
+
+Force a mode explicitly with `--ui tui` (the default full-screen layout), `--ui inline`,
+`--ui plain`, `--screen-reader`, or `--json`. Sessions and tool activity are stored in SQLite under
 `PILOT_DATA_DIR` (default `~/.pilot`).
 
 Reference a file as context by typing `@` followed by its path (`@src/index.ts`, or
@@ -128,8 +134,18 @@ can't be pulled into a prompt by mistake. This applies everywhere, including fol
 the completion picker.
 
 Every tool call that isn't read-only asks for approval before it runs, showing the exact diff
-or command. Approve with `allow`/`deny`, optionally scoped to `once`, `session`, `tool`,
-`workspace`, or `application`.
+or command. There are two answers: **allow once**, or **allow for this session**. Nothing Pilot
+grants outlives the session — there is no workspace-wide or machine-wide approval to hand out from
+a prompt you are trying to get past.
+
+A session approval of a *tool* covers that tool by name: approving `write_file` stops the prompting
+for later writes, including to files it has not touched yet, and reaches nothing else — not `edit`,
+not `apply_patch`, not a command. Writes stay inside the workspace boundary either way. A session
+approval of a *command* stays bound to the command that was shown, because `run_command` carries
+its whole command line, so one approved `npm test` must not stand in for whatever runs next.
+Destructive actions are refused by a built-in rule that no approval can reach past.
+
+In plain mode the same answers are `allow once` / `allow session` and `deny`.
 
 ## Configuration
 
