@@ -16,7 +16,7 @@ const capableTerminal = {
 } as const satisfies TerminalCapabilitySnapshot;
 
 describe("presentation mode selection", () => {
-  it("selects TUI only for a capable interactive terminal", () => {
+  it("selects the full-screen TUI only for a capable interactive terminal", () => {
     expect(
       resolvePresentationMode({
         requested: "auto",
@@ -24,7 +24,7 @@ describe("presentation mode selection", () => {
         screenReader: false,
         capabilities: capableTerminal,
       }),
-    ).toBe("tui");
+    ).toBe("fullscreen");
     expect(
       resolvePresentationMode({
         requested: "auto",
@@ -33,6 +33,38 @@ describe("presentation mode selection", () => {
         capabilities: { ...capableTerminal, interactiveOutput: false },
       }),
     ).toBe("plain");
+  });
+
+  it("treats tui and fullscreen as the same renderer, and keeps inline reachable", () => {
+    for (const requested of ["tui", "fullscreen"] as const) {
+      expect(
+        resolvePresentationMode({
+          requested,
+          json: false,
+          screenReader: false,
+          capabilities: capableTerminal,
+        }),
+      ).toBe("fullscreen");
+    }
+    expect(
+      resolvePresentationMode({
+        requested: "inline",
+        json: false,
+        screenReader: false,
+        capabilities: capableTerminal,
+      }),
+    ).toBe("inline");
+  });
+
+  it("fails an explicit inline request the terminal cannot support", () => {
+    expect(() =>
+      resolvePresentationMode({
+        requested: "inline",
+        json: false,
+        screenReader: false,
+        capabilities: { ...capableTerminal, cursorAddressing: false, reason: "TERM=dumb" },
+      }),
+    ).toThrow("Use --ui plain");
   });
 
   it("gives JSON and screen-reader modes precedence over interactive layout", () => {

@@ -154,12 +154,13 @@ describe("terminal UI reducer", () => {
       reasoning: "Weighing the options",
       text: "Answer",
     });
-    expect(ui.state().showThinking).toBe(false);
+    // Reasoning is visible without asking for it; the toggle is how you turn it off.
+    expect(ui.state().showThinking).toBe(true);
 
     ui.toggleThinking();
-    expect(ui.state().showThinking).toBe(true);
-    ui.toggleThinking();
     expect(ui.state().showThinking).toBe(false);
+    ui.toggleThinking();
+    expect(ui.state().showThinking).toBe(true);
   });
 
   it("correlates tool lifecycle and streamed command output", () => {

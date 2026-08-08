@@ -172,7 +172,10 @@ export const initialTerminalUiState: TerminalUiState = Object.freeze({
   pendingPermission: undefined,
   pendingQuestion: undefined,
   showToolDetails: false,
-  showThinking: false,
+  // Reasoning is shown by default. On a reasoning model it is most of what happens between the
+  // prompt and the answer, and hiding it by default made long thinking pauses look like a hang.
+  // Ctrl+T turns it off for the rest of the session.
+  showThinking: true,
   currentTurnBlockStart: undefined,
   lastTurnSummary: undefined,
   committedBlockCount: 0,

@@ -212,8 +212,8 @@ const usage = `Usage:
   pilot config [--json]
   pilot instructions [--json] [FILE ...] [--directory DIR]
   pilot run [--model provider/model] [--json] "prompt"
-  pilot chat [--model provider/model] [--ui auto|tui|plain] [--screen-reader] [--json]
-  pilot chat --session SESSION_ID [--model provider/model] [--ui auto|tui|plain] [--json]
+  pilot chat [--model provider/model] [--ui auto|tui|inline|plain] [--screen-reader] [--json]
+  pilot chat --session SESSION_ID [--model provider/model] [--ui auto|tui|inline|plain] [--json]
   pilot sessions list [--json]
   pilot sessions show SESSION_ID [--json]
   pilot sessions fork SESSION_ID NEW_SESSION_ID [--through MESSAGE_ID]
@@ -337,7 +337,7 @@ function parseCommand(args: readonly string[], defaultModelKey: string): CliComm
       const value = rest[index + 1];
       if (name !== "chat") throw new CliUsageError("--ui is available only for chat");
       if (value === undefined || !isPresentationMode(value)) {
-        throw new CliUsageError("--ui requires one of: auto, tui, fullscreen, plain");
+        throw new CliUsageError("--ui requires one of: auto, tui, fullscreen, inline, plain");
       }
       if (uiSpecified) throw new CliUsageError("--ui may only be specified once");
       ui = value;
@@ -1047,7 +1047,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   }
   const eventFactory = new ChatEventFactory(dependencies.clock);
   if (
-    command.ui === "tui" &&
+    (command.ui === "tui" || command.ui === "fullscreen" || command.ui === "inline") &&
     !command.json &&
     !command.screenReader &&
     dependencies.chatRenderer === undefined

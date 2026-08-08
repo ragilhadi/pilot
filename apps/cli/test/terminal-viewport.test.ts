@@ -99,6 +99,30 @@ describe("fullscreen chat viewport", () => {
     expect(frame.some((line) => line.includes("more lines below"))).toBe(false);
   });
 
+  it("jumps to either end of the session in one keystroke", () => {
+    const view = viewport(longState(40), 24);
+    view.render(80);
+
+    view.scrollToTop();
+    const top = view.render(80);
+    expect(view.following).toBe(false);
+    expect(top.some((line) => line.includes("message 0"))).toBe(true);
+
+    view.scrollToBottom();
+    const bottom = view.render(80);
+    expect(view.following).toBe(true);
+    expect(bottom.some((line) => line.includes("message 39"))).toBe(true);
+  });
+
+  it("stays in follow mode when the whole transcript already fits", () => {
+    const view = viewport(longState(2), 24);
+    view.render(80);
+
+    view.scrollToTop();
+
+    expect(view.following).toBe(true);
+  });
+
   it("cannot scroll past either end", () => {
     const view = viewport(longState(40), 24);
     view.render(80);

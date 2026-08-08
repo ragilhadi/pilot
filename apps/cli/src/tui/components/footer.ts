@@ -32,6 +32,13 @@ function formatContextUsage(usage: TerminalUsageState): string | undefined {
   return `ctx ${used}/${compactNumber(usage.contextWindowTokens)} (${percent}%)`;
 }
 
+/**
+ * The status bar: one line, never two.
+ *
+ * It used to open with a full-width rule drawn directly under the rule the composer already draws
+ * along its own bottom edge — two adjacent horizontal lines separating nothing, costing a row of
+ * the screen that the transcript now gets instead.
+ */
 export class PilotFooter implements Component {
   readonly #state: () => TerminalUiState;
   readonly #theme: PilotTheme;
@@ -69,15 +76,11 @@ export class PilotFooter implements Component {
         failed === 0 ? `${summary.commands.length} command ok` : `${failed} command failed`,
       );
     }
+    // Only the keys you cannot discover by trying. Enter, Ctrl+J and Ctrl+Y were spending a third
+    // of the bar restating what a composer does; `?` is the one binding that has to be advertised,
+    // because it is what leads to the rest.
     const hints =
-      width >= 100
-        ? "Enter send  Ctrl+J newline  Ctrl+Y copy  Esc cancel  Ctrl+C twice exit"
-        : width >= 80
-          ? "Enter send  Ctrl+J newline  Esc cancel  Ctrl+C twice exit"
-          : "Enter send  Esc cancel";
-    return [
-      this.#theme.muted("─".repeat(Math.max(1, width))),
-      truncateToWidth(`${parts.join("  ")}  ${this.#theme.muted(hints)}`, width),
-    ];
+      width >= 60 ? "? help  Esc cancel  Ctrl+C exit" : width >= 40 ? "? help  Esc cancel" : "?";
+    return [truncateToWidth(`${parts.join("  ")}  ${this.#theme.muted(hints)}`, width)];
   }
 }
