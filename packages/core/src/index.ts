@@ -135,6 +135,28 @@ export {
 } from "./domain/permission/index.js";
 export { type ToolRecovery, ToolRecoverySchema } from "./domain/recovery.js";
 export {
+  expandPromptTemplate,
+  type FrontmatterDocument,
+  type FrontmatterValue,
+  maximumPromptTemplateCharacters,
+  maximumSkillBodyCharacters,
+  parseFrontmatterDocument,
+  parsePromptTemplate,
+  parseSkillDocument,
+  type PromptTemplate,
+  type PromptTemplateExpansion,
+  promptTemplateArgumentsPlaceholder,
+  promptTemplateExpansionSchemaVersion,
+  type PromptTemplateManifest,
+  PromptTemplateManifestSchema,
+  type SkillDocument,
+  SkillError,
+  type SkillErrorCode,
+  type SkillManifest,
+  SkillManifestSchema,
+  SkillNameSchema,
+} from "./domain/skill/index.js";
+export {
   type AnyToolSchema,
   defineTool,
   extractSchemaIssues,
@@ -239,6 +261,7 @@ export {
   type ToolCallId,
   toolCallId,
 } from "./shared/brand.js";
+export { type Sha256Digest, sha256Digest, sha256Hex } from "./shared/digest.js";
 export {
   type JsonObject,
   type JsonPrimitive,

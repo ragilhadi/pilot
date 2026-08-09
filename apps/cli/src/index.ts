@@ -8,7 +8,12 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { InstructionDiscovery, runtimeVersion } from "@pilotrun/agent-runtime";
+import {
+  InstructionDiscovery,
+  PromptTemplateDiscovery,
+  runtimeVersion,
+  SkillDiscovery,
+} from "@pilotrun/agent-runtime";
 import { builtinLanguageServers, resolveExecutable } from "@pilotrun/lsp";
 import {
   createSqliteRepositories,
@@ -28,7 +33,7 @@ import {
 } from "@pilotrun/core";
 import { remediationForError, runCli } from "./cli.js";
 import { defaultConfigurationPaths, loadCliConfiguration } from "./configuration.js";
-import { NodeInstructionFileReader } from "./node-instruction-reader.js";
+import { NodeWorkspaceDocumentReader } from "./node-document-reader.js";
 import { PilotDoctor, type LanguageServerDiagnostic } from "./diagnostics.js";
 import { createModelCatalog, inspectProviderCredentials } from "./model-catalog.js";
 import { modelsStorePath, readPersistedModels } from "./model-store.js";
@@ -96,7 +101,7 @@ export {
   loadCliConfiguration,
   pilotConfigEnvironmentVariable,
 } from "./configuration.js";
-export { NodeInstructionFileReader } from "./node-instruction-reader.js";
+export { NodeWorkspaceDocumentReader } from "./node-document-reader.js";
 export {
   type DiagnosticCheck,
   type DiagnosticStatus,
@@ -200,6 +205,7 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
         const usesPersistence =
           args[0] === "chat" || args[0] === "sessions" || args[0] === "doctor";
         const usesInstructions = args[0] === "instructions" || args[0] === "chat";
+        const usesSkills = args[0] === "skills" || args[0] === "prompts" || args[0] === "chat";
         let persistence: Parameters<typeof runCli>[1]["persistence"];
         if (usesPersistence) {
           const configuredDirectory = configuration.configuration.persistence.dataDirectory;
@@ -218,9 +224,22 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
             administration: new SqliteSessionAdministration(sessionDatabase, repositories),
           };
         }
-        const instructionDiscovery = usesInstructions
-          ? new InstructionDiscovery(await NodeInstructionFileReader.create(process.cwd()))
-          : undefined;
+        const documentReader =
+          usesInstructions || usesSkills
+            ? await NodeWorkspaceDocumentReader.create(process.cwd())
+            : undefined;
+        const instructionDiscovery =
+          usesInstructions && documentReader !== undefined
+            ? new InstructionDiscovery(documentReader)
+            : undefined;
+        const skillDiscovery =
+          usesSkills && documentReader !== undefined
+            ? new SkillDiscovery(documentReader)
+            : undefined;
+        const promptTemplateDiscovery =
+          usesSkills && documentReader !== undefined
+            ? new PromptTemplateDiscovery(documentReader)
+            : undefined;
         const configuredDataDirectory = configuration.configuration.persistence.dataDirectory;
         const instructionDataDirectory =
           configuredDataDirectory === undefined
@@ -313,6 +332,14 @@ export async function main(args: readonly string[] = process.argv.slice(2)): Pro
             : {
                 instructionDiscovery,
                 instructionGlobalPath: path.join(instructionDataDirectory, "AGENTS.md"),
+              }),
+          ...(skillDiscovery === undefined || promptTemplateDiscovery === undefined
+            ? {}
+            : {
+                skillDiscovery,
+                promptTemplateDiscovery,
+                skillGlobalDirectory: path.join(instructionDataDirectory, "skills"),
+                promptGlobalDirectory: path.join(instructionDataDirectory, "prompts"),
               }),
         });
         const exitCode =

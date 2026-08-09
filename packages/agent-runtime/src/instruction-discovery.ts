@@ -1,4 +1,9 @@
-import { PilotError } from "@pilotrun/core";
+import { PilotError, sha256Hex } from "@pilotrun/core";
+import type {
+  DocumentReader,
+  DocumentReadRequest,
+  DocumentReadResult,
+} from "./workspace-document-reader.js";
 
 export type InstructionTrust = "trusted-user" | "untrusted-project";
 
@@ -7,30 +12,9 @@ export interface InstructionTarget {
   readonly kind: "directory" | "file";
 }
 
-export interface InstructionReadRequest {
-  readonly kind: "global" | "workspace";
-  readonly path: string;
-  readonly maximumBytes: number;
-}
-
-export type InstructionReadResult =
-  | { readonly status: "missing" }
-  | {
-      readonly status: "rejected";
-      readonly reason: "outside-workspace" | "read-failed" | "too-large";
-      readonly detail: string;
-    }
-  | {
-      readonly status: "found";
-      readonly displayPath: string;
-      readonly realPath: string;
-      readonly content: string;
-      readonly bytes: number;
-    };
-
-export interface InstructionFileReader {
-  read(request: InstructionReadRequest): Promise<InstructionReadResult>;
-}
+export type InstructionReadRequest = DocumentReadRequest;
+export type InstructionReadResult = DocumentReadResult;
+export type InstructionFileReader = DocumentReader;
 
 export interface InstructionDocument {
   readonly id: string;
@@ -304,9 +288,4 @@ function validateLimit(value: number, label: string): void {
       `${label} must be a positive integer`,
     );
   }
-}
-
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }

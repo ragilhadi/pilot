@@ -48,6 +48,15 @@ const promptLayerSchema = z
   .object({ systemPrompt: z.enum(["builtin", "none"]).optional() })
   .strict()
   .readonly();
+const skillsLayerSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    maxFileBytes: z.number().int().positive().max(1_000_000).optional(),
+    maxTotalBytes: z.number().int().positive().max(10_000_000).optional(),
+    maxSkills: z.number().int().positive().max(1_000).optional(),
+  })
+  .strict()
+  .readonly();
 const permissionsLayerSchema = z
   .object({ rules: z.array(PermissionRuleSchema).max(1_000).readonly().optional() })
   .strict()
@@ -83,6 +92,7 @@ export const ConfigurationLayerValueSchema = z
     context: contextLayerSchema.optional(),
     diagnostics: diagnosticsLayerSchema.optional(),
     prompt: promptLayerSchema.optional(),
+    skills: skillsLayerSchema.optional(),
     permissions: permissionsLayerSchema.optional(),
     runBudget: runBudgetLayerSchema.optional(),
     webSearch: webSearchSchema.optional(),
@@ -149,6 +159,21 @@ export const PilotConfigurationSchema = z
         systemPrompt: z.enum(["builtin", "none"]),
       })
       .strict()
+      .readonly(),
+    skills: z
+      .object({
+        // Discovery is read-only and cheap, but a project that ships skills is still supplying
+        // model instructions, so the whole subsystem can be switched off in one place.
+        enabled: z.boolean(),
+        maxFileBytes: z.number().int().positive().max(1_000_000),
+        maxTotalBytes: z.number().int().positive().max(10_000_000),
+        maxSkills: z.number().int().positive().max(1_000),
+      })
+      .strict()
+      .refine(
+        ({ maxFileBytes, maxTotalBytes }) => maxFileBytes <= maxTotalBytes,
+        "Per-file skill limit cannot exceed the total skill limit",
+      )
       .readonly(),
     permissions: z
       .object({ rules: z.array(PermissionRuleSchema).max(1_000).readonly() })

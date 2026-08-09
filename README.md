@@ -213,6 +213,16 @@ Project-level `AGENTS.md` files (discovered from the workspace root down to each
 file's directory) provide project instructions; a trusted `~/.pilot/AGENTS.md` provides global
 ones. Inspect what applies with `pilot instructions`.
 
+### Skills and prompt templates
+
+A skill is a Markdown file of instructions for one kind of work, kept in `.pilot/skills` (or your own
+`~/.pilot/skills`). Pilot discovers and validates them on its own but **never activates one by
+itself**: `pilot skills` lists what was found, where it came from, and what it restricts, and `/skill
+NAME` in chat switches it on for the session. A skill's manifest can require tools, deny tools, and
+force confirmation for a risk class — it has no way to grant a permission. Prompt templates
+(`.pilot/prompts`) are reusable prompts with placeholders that `/prompt NAME arguments` expands into
+a single turn. See the [user guide](./docs/user-guide.md#skills-and-prompt-templates).
+
 ## Development
 
 ```sh

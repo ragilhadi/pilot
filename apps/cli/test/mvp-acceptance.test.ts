@@ -20,7 +20,7 @@ import type { GitCommandRunner } from "@pilotrun/tools-builtin";
 import { FakeLanguageModel, textResponseScript, toolCallScript } from "@pilotrun/testkit";
 import { describe, expect, it, vi } from "vitest";
 import {
-  NodeInstructionFileReader,
+  NodeWorkspaceDocumentReader,
   runCli,
   type LineReader,
   type TextWriter,
@@ -123,7 +123,7 @@ describe("MVP acceptance scenario", () => {
         const output = memoryWriter();
         const errors = memoryWriter();
         const gitRunner = fixtureGitRunner(workspacePath);
-        const instructionReader = await NodeInstructionFileReader.create(workspacePath);
+        const instructionReader = await NodeWorkspaceDocumentReader.create(workspacePath);
         const instructionDiscovery = new InstructionDiscovery(instructionReader);
 
         database = openPersistence(databasePath).database;
@@ -346,7 +346,7 @@ describe("MVP acceptance scenario", () => {
         database = openPersistence(databasePath).database;
         const persistence = openRepositories(database);
         const instructionDiscovery = new InstructionDiscovery(
-          await NodeInstructionFileReader.create(workspacePath),
+          await NodeWorkspaceDocumentReader.create(workspacePath),
         );
         const running = runCli(["chat", "--model", "fake/mvp-tui"], {
           ...dependencies({

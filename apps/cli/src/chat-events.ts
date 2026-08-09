@@ -3,6 +3,7 @@ import type {
   ConversationIncomplete,
   PromptCompositionSnapshot,
   RunState,
+  SkillTrust,
   ToolExecutionLifecycleEvent,
 } from "@pilotrun/agent-runtime";
 import type {
@@ -13,6 +14,7 @@ import type {
   JsonValue,
   ModelStreamEvent,
   PermissionApprovalRequest,
+  PermissionEffect,
   RunId,
   SafeErrorSnapshot,
   SessionId,
@@ -22,6 +24,32 @@ import type { TextWriter } from "./cli.js";
 import { sanitizeTerminalText } from "./presentation/sanitize-terminal-text.js";
 
 export const chatEventSchemaVersion = 1 as const;
+
+export interface SkillSummary {
+  readonly name: string;
+  readonly description: string;
+  readonly displayPath: string;
+  readonly trust: SkillTrust;
+  readonly active: boolean;
+  readonly requiresTools: readonly string[];
+  readonly deniesTools: readonly string[];
+  readonly confirmsRisks: readonly string[];
+}
+
+export interface PromptTemplateSummary {
+  readonly name: string;
+  readonly description: string;
+  readonly displayPath: string;
+  readonly trust: SkillTrust;
+  /** Rendered argument hint, e.g. `<testPath>`. */
+  readonly arguments: string;
+}
+
+export interface CatalogDiagnostic {
+  readonly path: string;
+  readonly reason: string;
+  readonly detail: string;
+}
 
 interface ChatEventBase<Type extends string, Payload> {
   readonly schemaVersion: typeof chatEventSchemaVersion;
@@ -43,6 +71,59 @@ export type ChatEvent =
       { readonly modelKey: string; readonly contextWindowTokens?: number }
     >
   | ChatEventBase<"chat.help", { readonly commands: readonly string[] }>
+  | ChatEventBase<
+      "chat.skills",
+      {
+        readonly skills: readonly SkillSummary[];
+        readonly diagnostics: readonly CatalogDiagnostic[];
+      }
+    >
+  | ChatEventBase<
+      "chat.skill.activated",
+      {
+        readonly name: string;
+        readonly displayPath: string;
+        readonly trust: SkillTrust;
+        readonly sha256: string;
+        readonly requiredTools: readonly string[];
+        /** The session-scoped rules the skill added; each one denies or asks, never allows. */
+        readonly restrictions: readonly {
+          readonly ruleId: string;
+          readonly effect: PermissionEffect;
+          readonly reason: string;
+        }[];
+      }
+    >
+  | ChatEventBase<"chat.skill.deactivated", { readonly name: string }>
+  | ChatEventBase<
+      "chat.skill.rejected",
+      {
+        readonly name: string;
+        readonly reason: "already-active" | "missing-tools" | "not-found";
+        readonly detail: string;
+        readonly missingTools?: readonly string[];
+      }
+    >
+  | ChatEventBase<
+      "chat.prompts",
+      {
+        readonly templates: readonly PromptTemplateSummary[];
+        readonly diagnostics: readonly CatalogDiagnostic[];
+      }
+    >
+  | ChatEventBase<
+      "chat.prompt.expanded",
+      {
+        readonly name: string;
+        readonly displayPath: string;
+        readonly trust: SkillTrust;
+        readonly templateSha256: string;
+        /** Equal templates and equal arguments always produce this same fingerprint. */
+        readonly fingerprint: string;
+        readonly parameters: Readonly<Record<string, string>>;
+        readonly characters: number;
+      }
+    >
   | ChatEventBase<"chat.context", { readonly snapshot?: PromptCompositionSnapshot }>
   | ChatEventBase<"chat.input.queued", { readonly messageId: string }>
   | ChatEventBase<
@@ -168,6 +249,49 @@ export class ChatEventRenderer {
       case "chat.context":
         this.#renderContext(event.payload.snapshot);
         break;
+      case "chat.skills":
+        if (event.payload.skills.length === 0) {
+          this.#stdout.write("[no skills discovered]\n");
+        }
+        for (const skill of event.payload.skills) {
+          this.#stdout.write(`${formatSkillSummary(skill)}\n`);
+        }
+        this.#renderCatalogDiagnostics("skill", event.payload.diagnostics);
+        break;
+      case "chat.skill.activated":
+        this.#stdout.write(
+          `[skill activated: ${sanitizeTerminalText(event.payload.name)} (${event.payload.trust}; ${sanitizeTerminalText(event.payload.displayPath)}; ${event.payload.sha256})]\n`,
+        );
+        for (const restriction of event.payload.restrictions) {
+          this.#stdout.write(
+            `  ${restriction.effect}: ${sanitizeTerminalText(restriction.reason)}\n`,
+          );
+        }
+        break;
+      case "chat.skill.deactivated":
+        this.#stdout.write(`[skill deactivated: ${sanitizeTerminalText(event.payload.name)}]\n`);
+        break;
+      case "chat.skill.rejected":
+        this.#stderr.write(
+          `[skill not activated: ${sanitizeTerminalText(event.payload.name)}: ${sanitizeTerminalText(event.payload.detail)}]\n`,
+        );
+        break;
+      case "chat.prompts":
+        if (event.payload.templates.length === 0) {
+          this.#stdout.write("[no prompt templates discovered]\n");
+        }
+        for (const template of event.payload.templates) {
+          this.#stdout.write(
+            `/prompt ${template.name} ${sanitizeTerminalText(template.arguments)}\t${sanitizeTerminalText(template.description)}\t${template.trust}\n`,
+          );
+        }
+        this.#renderCatalogDiagnostics("prompt template", event.payload.diagnostics);
+        break;
+      case "chat.prompt.expanded":
+        this.#stdout.write(
+          `[prompt ${sanitizeTerminalText(event.payload.name)} expanded: ${event.payload.characters} characters; ${event.payload.fingerprint}]\n`,
+        );
+        break;
       case "chat.input.queued":
         this.#stdout.write("\n[follow-up queued]\n");
         break;
@@ -275,6 +399,14 @@ export class ChatEventRenderer {
     }
   }
 
+  #renderCatalogDiagnostics(label: string, diagnostics: readonly CatalogDiagnostic[]): void {
+    for (const diagnostic of diagnostics) {
+      this.#stderr.write(
+        `[${label} rejected: ${sanitizeTerminalText(diagnostic.path)}: ${diagnostic.reason}: ${sanitizeTerminalText(diagnostic.detail)}]\n`,
+      );
+    }
+  }
+
   #renderContext(snapshot: PromptCompositionSnapshot | undefined): void {
     if (snapshot === undefined) {
       this.#stdout.write("[context unavailable: run a turn first]\n");
@@ -295,6 +427,26 @@ export class ChatEventRenderer {
       );
     }
   }
+}
+
+/**
+ * Renders one catalogue row: the activation marker, the name, what the skill needs, what it takes
+ * away, and where it came from. Trust is shown on every row because a project-supplied skill is
+ * untrusted content the user is choosing to put in front of the model.
+ */
+export function formatSkillSummary(skill: SkillSummary): string {
+  const restrictions = [
+    ...skill.deniesTools.map((tool) => `deny:${tool}`),
+    ...skill.confirmsRisks.map((risk) => `ask:${risk}`),
+  ];
+  return [
+    skill.active ? "*" : " ",
+    skill.name,
+    skill.trust,
+    skill.requiresTools.length === 0 ? "-" : `needs ${skill.requiresTools.join(",")}`,
+    restrictions.length === 0 ? "-" : restrictions.join(","),
+    sanitizeTerminalText(skill.description),
+  ].join("\t");
 }
 
 /**

@@ -201,6 +201,30 @@ export {
   type WaitingForModelRunState,
 } from "./run-state-machine.js";
 export {
+  type ActiveSkill,
+  assertNarrowingRules,
+  createActiveSkillContextSource,
+  type SkillActivation,
+  SkillActivationRegistry,
+  type SkillActivationRegistryOptions,
+  type SkillPermissionSink,
+  skillRestrictionRules,
+} from "./skill-activation.js";
+export {
+  type DiscoveredDocument,
+  type DiscoveredPromptTemplate,
+  type DiscoveredSkill,
+  type PromptTemplateCatalog,
+  PromptTemplateDiscovery,
+  type SkillCatalog,
+  type SkillDiagnostic,
+  type SkillDiagnosticReason,
+  SkillDiscovery,
+  SkillDiscoveryError,
+  type SkillDiscoveryOptions,
+  type SkillTrust,
+} from "./skill-discovery.js";
+export {
   type ConversationIncomplete,
   type ConversationModelRequest,
   type ConversationRunRecord,
@@ -254,3 +278,14 @@ export {
   type ToolResultPreservedErrorTruncation,
   type ToolResultTruncationMetadata,
 } from "./tool-result-context.js";
+export type {
+  DocumentDirectoryEntry,
+  DocumentDirectoryReader,
+  DocumentDirectoryRequest,
+  DocumentListResult,
+  DocumentOrigin,
+  DocumentReader,
+  DocumentReadRequest,
+  DocumentReadResult,
+  DocumentRejectionReason,
+} from "./workspace-document-reader.js";
