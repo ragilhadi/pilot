@@ -18,6 +18,9 @@ export const builtinConfiguration: PilotConfiguration = PilotConfigurationSchema
   // on files a language server actually serves.
   diagnostics: { enabled: true, timeoutMs: 3_000 },
   prompt: { systemPrompt: "builtin" },
+  // Skills are discovered and listed by default but never activate on their own: activation is
+  // always an explicit user action in this phase.
+  skills: { enabled: true, maxFileBytes: 65_536, maxTotalBytes: 524_288, maxSkills: 200 },
   permissions: { rules: [] },
   runBudget: {
     // Loop bounds are generous backstops against runaway iteration, not the

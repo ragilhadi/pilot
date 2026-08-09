@@ -4,7 +4,10 @@ import {
   type ContextOccupancy,
   type ContextSource,
   ConversationModelRequestContextPreparer,
+  createActiveSkillContextSource,
   createSystemPromptContextSource,
+  type DiscoveredPromptTemplate,
+  type DiscoveredSkill,
   InMemorySessionRepository,
   type InstructionDiscovery,
   type InstructionTarget,
@@ -12,11 +15,17 @@ import {
   ModelStreamAccumulator,
   PermissionPolicyEngine,
   type PromptCompositionSnapshot,
+  type PromptTemplateCatalog,
+  type PromptTemplateDiscovery,
   RepositoryRunLifecycleCheckpointWriter,
   RequestTokenAccountant,
   RunInterruptionQueue,
   ScriptAwareHeuristicCounter,
   SessionConversationRunner,
+  type SkillCatalog,
+  SkillActivationRegistry,
+  type SkillDiscovery,
+  type SkillDiscoveryOptions,
   ThrottledRunCheckpointWriter,
   TokenCounterContextEstimator,
   ToolRegistry,
@@ -31,12 +40,14 @@ import {
   type EnvironmentReference,
   type IdSource,
   type JsonValue,
+  expandPromptTemplate,
   messageId,
   type PersistenceRepositories,
   parseAgentMessage,
   parseModelRequest,
   resolveEnvironmentReference,
   runId,
+  SkillError,
   SessionError,
   sessionId,
   type ToolRisk,
@@ -95,6 +106,7 @@ import {
 } from "./model-store.js";
 import type { ChatEventSink } from "./presentation/chat-presentation.js";
 import { isPresentationMode, type PresentationMode } from "./presentation/presentation-mode.js";
+import { sanitizeTerminalText } from "./presentation/sanitize-terminal-text.js";
 import type { StructuredLogger } from "./structured-logger.js";
 
 export interface TextWriter {
@@ -126,6 +138,10 @@ export interface CliDependencies {
   readonly configuration?: EffectiveConfiguration;
   readonly instructionDiscovery?: InstructionDiscovery;
   readonly instructionGlobalPath?: string;
+  readonly skillDiscovery?: SkillDiscovery;
+  readonly promptTemplateDiscovery?: PromptTemplateDiscovery;
+  readonly skillGlobalDirectory?: string;
+  readonly promptGlobalDirectory?: string;
   readonly doctor?: PilotDoctor;
   readonly logger?: StructuredLogger;
   readonly chatRenderer?: ChatEventSink;
@@ -151,6 +167,18 @@ interface InstructionsCommand {
   readonly type: "instructions";
   readonly json: boolean;
   readonly targets: readonly InstructionTarget[];
+}
+
+interface SkillsCommand {
+  readonly type: "skills";
+  readonly json: boolean;
+  readonly name?: string;
+}
+
+interface PromptsCommand {
+  readonly type: "prompts";
+  readonly json: boolean;
+  readonly name?: string;
 }
 
 interface DoctorCommand {
@@ -198,8 +226,10 @@ type CliCommand =
   | DoctorCommand
   | InstructionsCommand
   | ModelsCommand
+  | PromptsCommand
   | RunCommand
-  | SessionsCommand;
+  | SessionsCommand
+  | SkillsCommand;
 
 class CliUsageError extends Error {}
 
@@ -211,6 +241,10 @@ const usage = `Usage:
   pilot models remove MODEL_ID [--provider P]
   pilot config [--json]
   pilot instructions [--json] [FILE ...] [--directory DIR]
+  pilot skills [--json]
+  pilot skills show SKILL_NAME [--json]
+  pilot prompts [--json]
+  pilot prompts show TEMPLATE_NAME [--json]
   pilot run [--model provider/model] [--json] "prompt"
   pilot chat [--model provider/model] [--ui auto|tui|inline|plain] [--screen-reader] [--json]
   pilot chat --session SESSION_ID [--model provider/model] [--ui auto|tui|inline|plain] [--json]
@@ -260,6 +294,12 @@ export async function runCli(
       case "instructions":
         exitCode = await executeInstructions(command, dependencies);
         break;
+      case "skills":
+        exitCode = await executeSkills(command, dependencies);
+        break;
+      case "prompts":
+        exitCode = await executePrompts(command, dependencies);
+        break;
       case "run":
         exitCode = await executeRun(command, dependencies);
         break;
@@ -307,6 +347,7 @@ function parseCommand(args: readonly string[], defaultModelKey: string): CliComm
     throw new CliUsageError("config accepts only the optional --json flag");
   }
   if (name === "instructions") return parseInstructionsCommand(rest);
+  if (name === "skills" || name === "prompts") return parseCatalogCommand(name, rest);
   if (name === "sessions") return parseSessionsCommand(rest);
   if (name !== "run" && name !== "chat") {
     throw new CliUsageError(
@@ -617,6 +658,232 @@ async function executeInstructions(
     );
   }
   return 0;
+}
+
+/** The in-chat commands `/help` reports, in the order they are shown. */
+const chatCommandSummaries: readonly string[] = Object.freeze([
+  "/help",
+  "/context",
+  "/skills",
+  "/skill <name>",
+  "/skill off <name>",
+  "/prompts",
+  "/prompt <name> [arguments]",
+  "/model <provider/model>",
+  "/abort",
+  "/exit",
+]);
+
+/** Where a project keeps the skills and prompt templates it ships to contributors. */
+const workspaceSkillsDirectory = ".pilot/skills";
+const workspacePromptsDirectory = ".pilot/prompts";
+
+function parseCatalogCommand(
+  type: "skills" | "prompts",
+  args: readonly string[],
+): SkillsCommand | PromptsCommand {
+  let json = false;
+  let name: string | undefined;
+  let expectsName = false;
+  for (const argument of args) {
+    if (argument === "--json") {
+      json = true;
+      continue;
+    }
+    if (argument.startsWith("--")) throw new CliUsageError(`unknown option ${argument}`);
+    if (argument === "show" && name === undefined && !expectsName) {
+      expectsName = true;
+      continue;
+    }
+    if (!expectsName || name !== undefined) {
+      throw new CliUsageError(`${type} accepts only: show NAME [--json]`);
+    }
+    name = argument;
+  }
+  if (expectsName && name === undefined) throw new CliUsageError(`${type} show requires a name`);
+  return Object.freeze({ type, json, ...(name === undefined ? {} : { name }) });
+}
+
+/**
+ * Resolves the discovery limits, or `undefined` when the user has switched skills off entirely.
+ *
+ * Discovery reads project-supplied files, so `skills.enabled: false` has to stop it happening at
+ * all rather than merely hiding the results.
+ */
+function catalogDiscoveryOptions(
+  dependencies: CliDependencies,
+  kind: "skills" | "prompts",
+): SkillDiscoveryOptions | undefined {
+  const skills = dependencies.configuration?.configuration.skills ?? builtinConfiguration.skills;
+  if (!skills.enabled) return undefined;
+  const globalDirectory =
+    kind === "skills" ? dependencies.skillGlobalDirectory : dependencies.promptGlobalDirectory;
+  return Object.freeze({
+    workspaceDirectory: kind === "skills" ? workspaceSkillsDirectory : workspacePromptsDirectory,
+    ...(globalDirectory === undefined ? {} : { globalDirectory }),
+    maximumFileBytes: skills.maxFileBytes,
+    maximumTotalBytes: skills.maxTotalBytes,
+    maximumDocuments: skills.maxSkills,
+  });
+}
+
+async function executeSkills(
+  command: SkillsCommand,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if (dependencies.skillDiscovery === undefined) {
+    throw new Error("Skill discovery is unavailable");
+  }
+  const options = catalogDiscoveryOptions(dependencies, "skills");
+  if (options === undefined) return renderDisabledCatalog(command.json, dependencies.stdout);
+  const catalog = await dependencies.skillDiscovery.discover(options);
+  if (command.name !== undefined) {
+    const skill = catalog.skills.find(({ name }) => name === command.name);
+    if (skill === undefined) {
+      dependencies.stderr.write(
+        `Unknown skill ${sanitizeTerminalText(command.name)}. Run pilot skills to list them.\n`,
+      );
+      return 1;
+    }
+    if (command.json) {
+      dependencies.stdout.write(`${JSON.stringify(skill)}\n`);
+      return 0;
+    }
+    dependencies.stdout.write(
+      `--- ${skill.name} [${skill.trust}; ${sanitizeTerminalText(skill.displayPath)}; ${skill.sha256}] ---\n`,
+    );
+    dependencies.stdout.write(`${sanitizeTerminalText(skill.description)}\n`);
+    for (const line of describeSkillRequirements(skill)) dependencies.stdout.write(`${line}\n`);
+    dependencies.stdout.write(`\n${sanitizeTerminalText(skill.body)}\n`);
+    return 0;
+  }
+  if (command.json) {
+    dependencies.stdout.write(`${JSON.stringify({ enabled: true, ...catalog })}\n`);
+    return 0;
+  }
+  dependencies.stdout.write("NAME\tTRUST\tLOCATION\tREQUIRES\tRESTRICTS\tDESCRIPTION\n");
+  for (const skill of catalog.skills) {
+    dependencies.stdout.write(
+      `${[
+        skill.name,
+        skill.trust,
+        sanitizeTerminalText(skill.displayPath),
+        (skill.manifest.requiresTools ?? []).join(",") || "-",
+        summarizeRestrictions(skill) || "-",
+        sanitizeTerminalText(skill.description),
+      ].join("\t")}\n`,
+    );
+  }
+  writeCatalogDiagnostics("skill", catalog.diagnostics, dependencies.stderr);
+  return 0;
+}
+
+async function executePrompts(
+  command: PromptsCommand,
+  dependencies: CliDependencies,
+): Promise<number> {
+  if (dependencies.promptTemplateDiscovery === undefined) {
+    throw new Error("Prompt template discovery is unavailable");
+  }
+  const options = catalogDiscoveryOptions(dependencies, "prompts");
+  if (options === undefined) return renderDisabledCatalog(command.json, dependencies.stdout);
+  const catalog = await dependencies.promptTemplateDiscovery.discover(options);
+  if (command.name !== undefined) {
+    const template = catalog.templates.find(({ name }) => name === command.name);
+    if (template === undefined) {
+      dependencies.stderr.write(
+        `Unknown prompt template ${sanitizeTerminalText(command.name)}. Run pilot prompts to list them.\n`,
+      );
+      return 1;
+    }
+    if (command.json) {
+      dependencies.stdout.write(`${JSON.stringify(template)}\n`);
+      return 0;
+    }
+    dependencies.stdout.write(
+      `--- ${template.name} [${template.trust}; ${sanitizeTerminalText(template.displayPath)}; ${template.sha256}] ---\n`,
+    );
+    dependencies.stdout.write(`${sanitizeTerminalText(template.description)}\n`);
+    dependencies.stdout.write(
+      `placeholders: ${template.template.placeholders.join(", ") || "none"}\n`,
+    );
+    dependencies.stdout.write(`\n${sanitizeTerminalText(template.template.body)}\n`);
+    return 0;
+  }
+  if (command.json) {
+    dependencies.stdout.write(`${JSON.stringify({ enabled: true, ...catalog })}\n`);
+    return 0;
+  }
+  dependencies.stdout.write("NAME\tTRUST\tLOCATION\tARGUMENTS\tDESCRIPTION\n");
+  for (const template of catalog.templates) {
+    dependencies.stdout.write(
+      `${[
+        template.name,
+        template.trust,
+        sanitizeTerminalText(template.displayPath),
+        sanitizeTerminalText(describeTemplateArguments(template)),
+        sanitizeTerminalText(template.description),
+      ].join("\t")}\n`,
+    );
+  }
+  writeCatalogDiagnostics("prompt template", catalog.diagnostics, dependencies.stderr);
+  return 0;
+}
+
+/** The argument hint shown in listings: the author's own wording, else the parameter names. */
+function describeTemplateArguments(template: DiscoveredPromptTemplate): string {
+  const hint = template.template.manifest.argumentHint;
+  if (hint !== undefined) return hint;
+  const parameters = template.template.manifest.parameters ?? [];
+  return parameters.length === 0
+    ? template.template.placeholders.length === 0
+      ? "-"
+      : "<text>"
+    : parameters.map((parameter) => `<${parameter}>`).join(" ");
+}
+
+function renderDisabledCatalog(json: boolean, stdout: TextWriter): number {
+  stdout.write(
+    json
+      ? `${JSON.stringify({ enabled: false })}\n`
+      : "[skills and prompt templates are disabled by configuration]\n",
+  );
+  return 0;
+}
+
+function describeSkillRequirements(skill: DiscoveredSkill): readonly string[] {
+  const lines: string[] = [];
+  const requires = skill.manifest.requiresTools ?? [];
+  if (requires.length > 0) lines.push(`requires tools: ${requires.join(", ")}`);
+  const denies = skill.manifest.deniesTools ?? [];
+  if (denies.length > 0) lines.push(`denies tools: ${denies.join(", ")}`);
+  const confirms = skill.manifest.confirmsRisks ?? [];
+  if (confirms.length > 0) lines.push(`always confirms: ${confirms.join(", ")}`);
+  lines.push("permissions: equal or stricter than the session's; a skill can never grant one");
+  return Object.freeze(lines);
+}
+
+function summarizeRestrictions(skill: DiscoveredSkill): string {
+  return [
+    ...(skill.manifest.deniesTools ?? []).map((tool) => `deny:${tool}`),
+    ...(skill.manifest.confirmsRisks ?? []).map((risk) => `ask:${risk}`),
+  ].join(",");
+}
+
+function writeCatalogDiagnostics(
+  label: string,
+  diagnostics: readonly {
+    readonly path: string;
+    readonly reason: string;
+    readonly detail: string;
+  }[],
+  stderr: TextWriter,
+): void {
+  for (const diagnostic of diagnostics) {
+    stderr.write(
+      `[${label} rejected: ${sanitizeTerminalText(diagnostic.path)}: ${diagnostic.reason}: ${sanitizeTerminalText(diagnostic.detail)}]\n`,
+    );
+  }
 }
 
 function renderConfiguration(
@@ -1157,6 +1424,17 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       ? {}
       : { rules: dependencies.configuration.configuration.permissions.rules }),
   });
+  // Skills are discovered fresh on each `/skills` and `/skill` so an edited file is picked up, but
+  // the body and its digest are snapshotted at activation: what the model sees is what the user
+  // approved, not whatever the file says later in the session.
+  const skillOptions = catalogDiscoveryOptions(dependencies, "skills");
+  const promptOptions = catalogDiscoveryOptions(dependencies, "prompts");
+  const skills = new SkillActivationRegistry({
+    sessionId: String(id),
+    clock: dependencies.clock,
+    permissions,
+    toolNames: () => tools.list().map(({ definition }) => definition.name),
+  });
   const persistedCalls = new Map<
     string,
     { readonly sequence: number; readonly startedAt: string; readonly input: JsonValue }
@@ -1254,9 +1532,13 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       tokenEstimator: sharedTokenEstimator,
       now: () => dependencies.clock.now().toISOString(),
       ...(() => {
-        const sources = [systemPromptContextSource, instructionContextSource].filter(
-          (source): source is ContextSource => source !== undefined,
-        );
+        const sources = [
+          systemPromptContextSource,
+          skillOptions === undefined || dependencies.skillDiscovery === undefined
+            ? undefined
+            : createActiveSkillContextSource(skills),
+          instructionContextSource,
+        ].filter((source): source is ContextSource => source !== undefined);
         return sources.length === 0 ? {} : { additionalSources: sources, targetPaths: ["."] };
       })(),
     }),
@@ -1453,6 +1735,184 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   };
   emit({ type: "chat.started", sessionId: id, payload: modelPayload(activeModelKey) });
 
+  const skillsUnavailable = (): undefined => {
+    dependencies.stderr.write(
+      "Skills and prompt templates are unavailable in this session.\nEnable them with skills.enabled in config.jsonc.\n",
+    );
+    return undefined;
+  };
+  const discoverSkills = async (): Promise<SkillCatalog | undefined> =>
+    dependencies.skillDiscovery === undefined || skillOptions === undefined
+      ? skillsUnavailable()
+      : dependencies.skillDiscovery.discover(skillOptions);
+  const discoverPromptTemplates = async (): Promise<PromptTemplateCatalog | undefined> =>
+    dependencies.promptTemplateDiscovery === undefined || promptOptions === undefined
+      ? skillsUnavailable()
+      : dependencies.promptTemplateDiscovery.discover(promptOptions);
+
+  const emitSkillCatalog = async (): Promise<void> => {
+    const catalog = await discoverSkills();
+    if (catalog === undefined) return;
+    emit({
+      type: "chat.skills",
+      sessionId: id,
+      payload: {
+        skills: catalog.skills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          displayPath: skill.displayPath,
+          trust: skill.trust,
+          active: skills.isActive(skill.name),
+          requiresTools: [...(skill.manifest.requiresTools ?? [])],
+          deniesTools: [...(skill.manifest.deniesTools ?? [])],
+          confirmsRisks: [...(skill.manifest.confirmsRisks ?? [])],
+        })),
+        diagnostics: catalog.diagnostics.map(({ path, reason, detail }) => ({
+          path,
+          reason,
+          detail,
+        })),
+      },
+    });
+  };
+
+  const runSkillCommand = async (argument: string): Promise<void> => {
+    const deactivation = /^(?:off|--off)\s+(?<name>\S+)$/u.exec(argument)?.groups?.name;
+    if (deactivation !== undefined) {
+      if (skills.deactivate(deactivation)) {
+        emit({ type: "chat.skill.deactivated", sessionId: id, payload: { name: deactivation } });
+      } else {
+        dependencies.stderr.write(`Skill ${sanitizeTerminalText(deactivation)} is not active.\n`);
+      }
+      return;
+    }
+    if (argument.length === 0 || /\s/u.test(argument)) {
+      dependencies.stderr.write(
+        "Usage: /skill NAME to activate, /skill off NAME to deactivate. /skills lists them.\n",
+      );
+      return;
+    }
+    const catalog = await discoverSkills();
+    if (catalog === undefined) return;
+    const skill = catalog.skills.find(({ name }) => name === argument);
+    if (skill === undefined) {
+      emit({
+        type: "chat.skill.rejected",
+        sessionId: id,
+        payload: {
+          name: argument,
+          reason: "not-found",
+          detail: "No skill with that name was discovered",
+        },
+      });
+      return;
+    }
+    const activation = skills.activate(skill);
+    if (activation.status === "rejected") {
+      emit({
+        type: "chat.skill.rejected",
+        sessionId: id,
+        payload: {
+          name: skill.name,
+          reason: activation.reason,
+          detail: activation.detail,
+          ...(activation.missingTools === undefined
+            ? {}
+            : { missingTools: [...activation.missingTools] }),
+        },
+      });
+      return;
+    }
+    emit({
+      type: "chat.skill.activated",
+      sessionId: id,
+      payload: {
+        name: activation.skill.name,
+        displayPath: activation.skill.displayPath,
+        trust: activation.skill.trust,
+        sha256: activation.skill.sha256,
+        requiredTools: [...activation.skill.requiredTools],
+        restrictions: activation.skill.restrictions.map(({ id: ruleId, effect, reason }) => ({
+          ruleId,
+          effect,
+          reason,
+        })),
+      },
+    });
+  };
+
+  const emitPromptCatalog = async (): Promise<void> => {
+    const catalog = await discoverPromptTemplates();
+    if (catalog === undefined) return;
+    emit({
+      type: "chat.prompts",
+      sessionId: id,
+      payload: {
+        templates: catalog.templates.map((template) => ({
+          name: template.name,
+          description: template.description,
+          displayPath: template.displayPath,
+          trust: template.trust,
+          arguments: describeTemplateArguments(template),
+        })),
+        diagnostics: catalog.diagnostics.map(({ path, reason, detail }) => ({
+          path,
+          reason,
+          detail,
+        })),
+      },
+    });
+  };
+
+  /**
+   * Expands `/prompt NAME rest of line` into the text of this turn.
+   *
+   * The expansion becomes the user's own message, so the model receives a prompt the user asked
+   * for rather than a second channel of instructions; the audit event records which template and
+   * which bound values produced it.
+   */
+  const expandChatPrompt = async (argument: string): Promise<string | undefined> => {
+    const separator = argument.search(/\s/u);
+    const name = separator < 0 ? argument : argument.slice(0, separator);
+    const argumentText = separator < 0 ? "" : argument.slice(separator + 1);
+    if (name.length === 0) {
+      dependencies.stderr.write(
+        "Usage: /prompt NAME [arguments]. /prompts lists the available templates.\n",
+      );
+      return undefined;
+    }
+    const catalog = await discoverPromptTemplates();
+    if (catalog === undefined) return undefined;
+    const template = catalog.templates.find((candidate) => candidate.name === name);
+    if (template === undefined) {
+      dependencies.stderr.write(
+        `Unknown prompt template ${sanitizeTerminalText(name)}. Run /prompts to list them.\n`,
+      );
+      return undefined;
+    }
+    try {
+      const expansion = await expandPromptTemplate(template.template, argumentText);
+      emit({
+        type: "chat.prompt.expanded",
+        sessionId: id,
+        payload: {
+          name: expansion.name,
+          displayPath: template.displayPath,
+          trust: template.trust,
+          templateSha256: expansion.templateSha256,
+          fingerprint: expansion.fingerprint,
+          parameters: expansion.parameters,
+          characters: expansion.text.length,
+        },
+      });
+      return expansion.text;
+    } catch (error) {
+      if (!(error instanceof SkillError)) throw error;
+      dependencies.stderr.write(`${sanitizeTerminalText(error.message)}\n`);
+      return undefined;
+    }
+  };
+
   let pendingLine: Promise<string | undefined> | undefined;
   let inputClosed = false;
   const readLine = (): Promise<string | undefined> => {
@@ -1481,7 +1941,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
           type: "chat.help",
           sessionId: id,
           payload: {
-            commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"],
+            commands: chatCommandSummaries,
           },
         });
         continue;
@@ -1521,8 +1981,26 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       if (text === "/abort") {
         continue;
       }
+      if (text === "/skills") {
+        await emitSkillCatalog();
+        continue;
+      }
+      if (text === "/skill" || text.startsWith("/skill ")) {
+        await runSkillCommand(text.slice("/skill".length).trim());
+        continue;
+      }
+      if (text === "/prompts") {
+        await emitPromptCatalog();
+        continue;
+      }
+      let promptText = text;
+      if (text === "/prompt" || text.startsWith("/prompt ")) {
+        const expanded = await expandChatPrompt(text.slice("/prompt".length).trim());
+        if (expanded === undefined) continue;
+        promptText = expanded;
+      }
 
-      const mentionContext = await resolveMentionContext(text, boundary, dependencies.signal);
+      const mentionContext = await resolveMentionContext(promptText, boundary, dependencies.signal);
       if (mentionContext.attachments.length > 0 || mentionContext.skipped.length > 0) {
         emit({
           type: "chat.context.attached",
@@ -1621,7 +2099,7 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
               type: "chat.help",
               sessionId: id,
               payload: {
-                commands: ["/help", "/context", "/model <provider/model>", "/abort", "/exit"],
+                commands: chatCommandSummaries,
               },
             });
           }

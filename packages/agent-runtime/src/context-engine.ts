@@ -12,19 +12,31 @@ import {
 
 export type ContextContent = AgentMessage | string;
 export type ContextTrust = "trusted" | "untrusted";
-export type ContextProvenanceKind =
-  | "conversation"
-  | "diagnostic"
-  | "git-diff"
-  | "instructions"
-  | "plan"
-  | "repository-summary"
-  | "subagent-result"
-  | "system-policy"
-  | "task-state"
-  | "tool-result"
-  | "user-message"
-  | "workspace-file";
+/**
+ * Every provenance kind a candidate may declare.
+ *
+ * One declaration serves as both the type and the runtime guard below. They used to be two lists,
+ * and a kind added to the type alone type-checked cleanly, then failed every turn at selection.
+ */
+export const contextProvenanceKinds = [
+  "conversation",
+  "diagnostic",
+  "git-diff",
+  "instructions",
+  "plan",
+  "repository-summary",
+  "skill",
+  "subagent-result",
+  "system-policy",
+  "task-state",
+  "tool-result",
+  "user-message",
+  "workspace-file",
+] as const;
+
+export type ContextProvenanceKind = (typeof contextProvenanceKinds)[number];
+
+const contextProvenanceKindSet: ReadonlySet<string> = new Set(contextProvenanceKinds);
 
 export interface ContextProvenance {
   readonly kind: ContextProvenanceKind;
@@ -597,21 +609,7 @@ function normalizeProvenance(
   candidateId: string,
   provenance: ContextProvenance,
 ): ContextProvenance {
-  const kinds: ReadonlySet<string> = new Set([
-    "conversation",
-    "diagnostic",
-    "git-diff",
-    "instructions",
-    "plan",
-    "repository-summary",
-    "subagent-result",
-    "system-policy",
-    "task-state",
-    "tool-result",
-    "user-message",
-    "workspace-file",
-  ]);
-  if (!kinds.has(provenance.kind)) {
+  if (!contextProvenanceKindSet.has(provenance.kind)) {
     throw new ContextEngineError(
       "PILOT_CONTEXT_INVALID",
       `Context candidate ${candidateId} has an invalid provenance kind`,

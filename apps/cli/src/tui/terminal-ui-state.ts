@@ -10,7 +10,12 @@ import type {
   SafeErrorSnapshot,
   TokenCountConfidence,
 } from "@pilotrun/core";
-import type { ChatEvent } from "../chat-events.js";
+import type {
+  CatalogDiagnostic,
+  ChatEvent,
+  PromptTemplateSummary,
+  SkillSummary,
+} from "../chat-events.js";
 
 export type TerminalUiPhase =
   | "starting"
@@ -281,6 +286,53 @@ export function reduceTerminalUi(
         ),
         ...(event.payload.snapshot === undefined ? {} : { context: event.payload.snapshot }),
       };
+    case "chat.skills":
+      return appendNotice(
+        sequencedState,
+        event,
+        event.payload.diagnostics.length > 0 ? "warning" : "info",
+        skillCatalogNotice(event.payload),
+      );
+    case "chat.skill.activated":
+      return appendNotice(
+        sequencedState,
+        event,
+        "success",
+        [
+          `Skill activated: ${event.payload.name} (${event.payload.trust}) from ${event.payload.displayPath}`,
+          ...event.payload.restrictions.map(
+            (restriction) => `  ${restriction.effect}: ${restriction.reason}`,
+          ),
+        ].join("\n"),
+      );
+    case "chat.skill.deactivated":
+      return appendNotice(
+        sequencedState,
+        event,
+        "info",
+        `Skill deactivated: ${event.payload.name}`,
+      );
+    case "chat.skill.rejected":
+      return appendNotice(
+        sequencedState,
+        event,
+        "danger",
+        `Skill ${event.payload.name} not activated: ${event.payload.detail}`,
+      );
+    case "chat.prompts":
+      return appendNotice(
+        sequencedState,
+        event,
+        event.payload.diagnostics.length > 0 ? "warning" : "info",
+        promptCatalogNotice(event.payload),
+      );
+    case "chat.prompt.expanded":
+      return appendNotice(
+        sequencedState,
+        event,
+        "info",
+        `Expanded /prompt ${event.payload.name} (${event.payload.characters} characters, ${event.payload.fingerprint})`,
+      );
     case "chat.input.queued":
       return {
         ...appendNotice(sequencedState, event, "info", "Follow-up queued"),
@@ -800,6 +852,54 @@ function questionNotice(request: ClarificationRequest): string {
   return options.length === 0
     ? `Question: ${request.question}`
     : `Question: ${request.question}  ${options}`;
+}
+
+/**
+ * The `/skills` notice. Every row states where the skill came from and what it takes away, because
+ * that — not the description its author wrote — is what the user is deciding about.
+ */
+function skillCatalogNotice(payload: {
+  readonly skills: readonly SkillSummary[];
+  readonly diagnostics: readonly CatalogDiagnostic[];
+}): string {
+  const rows =
+    payload.skills.length === 0
+      ? ["No skills discovered. Add one under .pilot/skills to get started."]
+      : payload.skills.map((skill) => {
+          const restrictions = [
+            ...skill.deniesTools.map((tool) => `deny ${tool}`),
+            ...skill.confirmsRisks.map((risk) => `confirm ${risk}`),
+          ];
+          const facts = [
+            skill.trust,
+            ...(skill.requiresTools.length === 0
+              ? []
+              : [`needs ${skill.requiresTools.join(", ")}`]),
+            ...(restrictions.length === 0 ? [] : [restrictions.join(", ")]),
+          ];
+          return `${skill.active ? "*" : " "} ${skill.name} — ${skill.description} (${facts.join("; ")})`;
+        });
+  return ["Skills:", ...rows, ...catalogDiagnosticRows(payload.diagnostics)].join("\n");
+}
+
+function promptCatalogNotice(payload: {
+  readonly templates: readonly PromptTemplateSummary[];
+  readonly diagnostics: readonly CatalogDiagnostic[];
+}): string {
+  const rows =
+    payload.templates.length === 0
+      ? ["No prompt templates discovered. Add one under .pilot/prompts to get started."]
+      : payload.templates.map(
+          (template) =>
+            `  /prompt ${template.name} ${template.arguments} — ${template.description} (${template.trust})`,
+        );
+  return ["Prompt templates:", ...rows, ...catalogDiagnosticRows(payload.diagnostics)].join("\n");
+}
+
+function catalogDiagnosticRows(diagnostics: readonly CatalogDiagnostic[]): readonly string[] {
+  return diagnostics.map(
+    (diagnostic) => `  ! ${diagnostic.path}: ${diagnostic.reason}: ${diagnostic.detail}`,
+  );
 }
 
 function contextSummary(snapshot: PromptCompositionSnapshot): string {
