@@ -115,6 +115,17 @@ describe("RepositoryIgnoreRules", () => {
     expect(rules.evaluate("nested/my-cache", true).ignored).toBe(true);
     expect(rules.evaluate("src/index.ts", false).ignored).toBe(false);
   });
+
+  it("applies directory-only rules to directories and their descendants, not files", () => {
+    const rules = RepositoryIgnoreRules.parse([{ source: ".gitignore", content: "artifacts/\n" }]);
+
+    expect(rules.evaluate("src/build", false).ignored).toBe(false);
+    expect(rules.evaluate("src/build", true).ignored).toBe(true);
+    expect(rules.evaluate("src/build/output.js", false).ignored).toBe(true);
+    expect(rules.evaluate("nested/artifacts", false).ignored).toBe(false);
+    expect(rules.evaluate("nested/artifacts", true).ignored).toBe(true);
+    expect(rules.evaluate("nested/artifacts/report.json", false).ignored).toBe(true);
+  });
 });
 
 describe("RepositoryDiscovery", () => {

@@ -196,8 +196,12 @@ function globExpression(pattern: string): string {
 }
 
 function matches(rule: IgnoreRule, relativePath: string, isDirectory: boolean): boolean {
-  if (rule.directoryOnly && !isDirectory && !relativePath.includes("/")) {
-    return false;
+  if (rule.directoryOnly && !isDirectory) {
+    const parentSeparator = relativePath.lastIndexOf("/");
+    if (parentSeparator < 0) {
+      return false;
+    }
+    return rule.regex.test(relativePath.slice(0, parentSeparator));
   }
   return rule.regex.test(relativePath);
 }
