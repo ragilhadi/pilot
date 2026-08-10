@@ -285,3 +285,47 @@ function context() {
     signal: new AbortController().signal,
   };
 }
+
+describe("default inherited environment", () => {
+  it("passes HOME and USERPROFILE to the executor via defaultInheritedEnvironmentNames", async () => {
+    let captured: CommandExecutionRequest | undefined;
+    const executor: CommandExecutor = {
+      execute: async (request) => {
+        captured = request;
+        return {
+          exitCode: 0,
+          signal: null,
+          stdout: "",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+          timedOut: false,
+          durationMs: 1,
+        };
+      },
+    };
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const tool = createRunCommandTool(boundary, {
+      executor,
+      environment: {
+        PATH: "/usr/bin",
+        HOME: "/home/testuser",
+        USERPROFILE: "C:\\Users\\testuser",
+        USER: "testuser",
+      },
+    });
+
+    await tool.execute(
+      RunCommandInputSchema.parse({
+        command: { mode: "direct", executable: "echo", args: ["hello"] },
+        cwd: ".",
+      }),
+      context(),
+    );
+
+    expect(captured).toBeDefined();
+    expect(captured!.environment).toHaveProperty("HOME", "/home/testuser");
+    expect(captured!.environment).toHaveProperty("USERPROFILE", "C:\\Users\\testuser");
+    expect(captured!.environment).toHaveProperty("USER", "testuser");
+  });
+});

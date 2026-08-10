@@ -490,12 +490,29 @@ function defaultShellConfiguration(
 }
 
 const defaultInheritedEnvironmentNames = Object.freeze([
+  // Core PATH-like variables (all platforms)
   "PATH",
+  // Windows-specific
   "PATHEXT",
   "SystemRoot",
   "COMSPEC",
   "TEMP",
   "TMP",
+  // Home and per-user state — required for git, npm, cargo, SSH, etc.
+  "HOME",
+  "USERPROFILE",
+  "HOMEDRIVE",
+  "HOMEPATH",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "USERNAME",
+  // POSIX locale/timezone
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TZ",
 ]);
 
 function selectEnvironment(
