@@ -1,21 +1,8 @@
 # Pilot
 
-Pilot is a terminal-first, provider-neutral coding-agent platform written in TypeScript. It
-streams responses from interchangeable language models, exposes repository and process access
-only through registered tools, asks for approval at risk boundaries, and persists sessions so
-you can resume them later.
-
-## Requirements
-
-- Node.js 22.19 or newer
-- ripgrep (`rg`) on `PATH` for the built-in repository search tool
-
-Optional, for type diagnostics after every edit (`pilot doctor` reports what is missing):
-
-- TypeScript 5.x/6.x projects: `npm install -g typescript-language-server typescript`
-- Python: `npm install -g pyright`
-
-TypeScript 7 projects need nothing — Pilot uses the compiler the project already depends on.
+A coding agent that lives in your terminal. Pilot reads and edits your repository, runs your
+build and tests, and asks before doing anything risky — with whichever language model you point
+it at.
 
 ## Install
 
@@ -23,168 +10,172 @@ TypeScript 7 projects need nothing — Pilot uses the compiler the project alrea
 npm install -g @pilotrun/cli
 ```
 
-This installs the `pilot` command globally. It works from any folder on your machine:
+You need **Node.js 22.19+** and **[ripgrep](https://github.com/BurntSushi/ripgrep)** (`rg`) on your
+`PATH`. Run `pilot doctor` at any time to check your setup.
 
-```sh
-cd ~/some/project
-pilot doctor
-pilot chat
-```
+## Quick start
 
-### From source
-
-```sh
-git clone https://github.com/ragilhadi/pilot.git
-cd pilot
-pnpm install
-pnpm build
-pnpm link:global   # links the local build as the global `pilot` command
-```
-
-`pnpm unlink:global` removes it again.
-
-## Usage
-
-```sh
-pilot doctor              # environment/health check
-pilot models              # list configured models
-pilot chat                # start an interactive session
-pilot run "fix the bug"   # one-shot, non-interactive
-pilot sessions list       # inspect stored sessions
-```
-
-Pilot's primary model is Ollama Cloud `glm-5.2:cloud`, served through a local Ollama daemon:
+Pilot uses Ollama Cloud's `glm-5.2:cloud` through a local Ollama daemon by default:
 
 ```sh
 ollama signin
 ollama pull glm-5.2:cloud
+
+cd ~/your/project
 pilot chat
 ```
 
-Override the local endpoint with `PILOT_OLLAMA_BASE_URL` if your daemon listens elsewhere.
+Then say what you want in plain language — *"the login test is failing, find out why and fix it"* —
+and approve the changes Pilot proposes.
 
-### Adding models
+## Commands
 
-Pull a model in Ollama, then register it with Pilot so it persists across sessions:
+| Command | What it does |
+| --- | --- |
+| `pilot chat` | Start an interactive session. The main way to use Pilot. |
+| `pilot chat --session <id>` | Pick up an earlier session where you left off. |
+| `pilot run "…"` | One shot, no interaction. Good for scripts and CI. |
+| `pilot doctor` | Check Node, Git, the workspace, the session database, and language servers. |
+| `pilot models` | List available models (`add` / `remove` to manage them). |
+| `pilot sessions list` | Browse past sessions (`show`, `export`, `fork`, `archive`, `delete`). |
+| `pilot config --json` | Print the effective configuration and where each value came from. |
+| `pilot skills` / `pilot prompts` | List the skills and prompt templates Pilot found. |
+| `pilot instructions [path]` | Show which `AGENTS.md` files apply, and in what order. |
+
+## In a chat session
+
+**Attach files with `@`.** Type `@src/index.ts` and a picker completes workspace paths as you go
+(`@"a file with spaces.ts"` for awkward names). Mention a folder — `@src` — to attach everything
+inside it, recursively. Pilot reads each file on send, in `chat` and in `pilot run "…"` alike.
+
+Files hidden by `.gitignore`, `.ignore`, `.pilotignore`, or the protected built-ins (a `.env`,
+anything under `node_modules`) are never read and are reported as skipped, so secrets can't be
+pulled into a prompt by accident. A folder that exceeds the per-turn budget (20 files, 256 KiB)
+attaches what fits and tells you what it left out.
+
+**Slash commands.** `/help` lists them all. The ones you'll reach for:
+
+| | |
+| --- | --- |
+| `/context` | What's in the context window right now |
+| `/skills`, `/skill <name>`, `/skill off <name>` | List and switch skills on or off |
+| `/prompts`, `/prompt <name> [arguments]` | List and expand prompt templates |
+| `/model <provider/model>` | Switch model mid-session |
+| `/abort`, `/exit` | Stop the current turn, or end the session |
+
+**Approvals.** Every tool call that isn't read-only asks first, showing the exact diff or command
+line, and you answer **allow once** or **allow for this session**. Nothing granted outlives the
+session, an approved tool doesn't cover the others, an approved command doesn't cover the next one,
+and destructive actions are refused outright.
+
+**Scrolling.** `PgUp`/`PgDn` by a screenful, `Shift+↑`/`Shift+↓` by a line, the wheel by three,
+`Home`/`End` for the start or the newest output. The wheel scrolls the transcript, so selecting
+text needs `Shift` held — or set `PILOT_TUI_MOUSE=0` to keep selection and scroll by keyboard.
+
+**Display modes.** The default full-screen view leaves your shell's scrollback untouched, so the
+transcript ends with the session. `--ui inline` does the opposite and writes finished output to
+your terminal's scrollback, where the wheel and tmux copy-mode can reach it later. `--ui plain`,
+`--screen-reader`, and `--json` are there too.
+
+## Choosing a model
+
+Pull a model in Ollama, then register it with Pilot so it sticks around:
 
 ```sh
 ollama pull deepseek-v4-flash:cloud
-pilot models add deepseek-v4-flash:cloud
+pilot models add deepseek-v4-flash:cloud --context-window 128000
 pilot chat --model ollama/deepseek-v4-flash:cloud
 ```
 
-`pilot models add` saves the model to `<data-dir>/models.json` (default `~/.pilot/models.json`),
-so it shows up in `pilot models` and is selectable from then on — no environment variables needed.
-Flags: `--provider` (default `ollama`), `--name`, `--base-url`, `--no-tools` (for models without
-tool-calling), `--vision`, and `--context-window N`. Remove one with
-`pilot models remove <model-id>`.
+Setting `--context-window` to the model's real window matters: without it Pilot falls back to a
+global default that over-fills a small model and under-uses a large one. It's also the denominator
+behind the `ctx 38k/128k (30%)` figure in the status line.
 
-Setting `--context-window` to the model's real window matters: without it Pilot falls back to the
-global `context.maxInputTokens`, which over-fills a small local model and under-uses a large one.
-It is also the denominator behind the `ctx 38k/128k (30%)` figure in the status line.
+Other flags: `--provider` (default `ollama`), `--name`, `--base-url`, `--no-tools` for models
+without tool-calling, and `--vision`. Remove one with `pilot models remove <model-id>`. If your
+daemon isn't at the usual address, set `PILOT_OLLAMA_BASE_URL`.
 
-For advanced setups (custom providers, credential references), additional OpenAI-compatible models
-can also be configured via `PILOT_OPENAI_COMPATIBLE_MODELS_JSON` (a JSON array of
-`{ provider, modelId, displayName, capabilities }` entries; credentials must be environment-variable
-references, never raw keys).
-
-In an interactive terminal, `chat` is a full-screen application (multiline editor, history, `/` and
-`@` completion, streaming Markdown, permission prompts). It draws on the alternate screen buffer,
-with the banner pinned to the top row and the composer and status line to the bottom, and the
-transcript scrolled between them by Pilot rather than by the terminal:
-
-| | |
-|---|---|
-| `PgUp` / `PgDn` | scroll a screenful |
-| `Shift+Up` / `Shift+Down` | scroll a line |
-| mouse wheel | scroll three lines |
-| `Home` / `End` | jump to the start of the session, or back to the newest output |
-| prompt sent, `PgDn` past the end, `Esc` while idle | follow the newest output |
-
-A rule above the composer reports how many lines are still below whenever you have scrolled back.
-Nothing Pilot draws touches your shell's scrollback, which comes back untouched on exit — the trade
-is that the transcript ends with the session instead of staying in the terminal.
-
-Because the wheel scrolls the transcript, the terminal's own text selection needs `Shift` held down;
-set `PILOT_TUI_MOUSE=0` to keep selection unmodified and scroll by keyboard only.
-
-`--ui inline` is the other shape, for when the transcript has to survive the session: finished
-output — your message, each settled tool call, each completed reply — is written to the terminal's
-own scrollback and never redrawn, so the scroll wheel, `Shift+PgUp`, and tmux copy-mode reach the
-whole session *and* whatever was on screen before Pilot started. Only a small live region at the
-bottom is repainted. Because committed output belongs to the terminal, it keeps the width it was
-written at: resizing does not reflow earlier output, the same way it does not reflow `git log`.
-
-Force a mode explicitly with `--ui tui` (the default full-screen layout), `--ui inline`,
-`--ui plain`, `--screen-reader`, or `--json`. Sessions and tool activity are stored in SQLite under
-`PILOT_DATA_DIR` (default `~/.pilot`).
-
-Reference a file as context by typing `@` followed by its path (`@src/index.ts`, or
-`@"a file with spaces.ts"` for paths with spaces); the picker lists workspace files and folders as
-you type. On send, Pilot reads each referenced file and includes its contents alongside your
-message — both in interactive `chat` and in `pilot run "…"`.
-
-Mentioning a folder (`@src`, or `@src/` from the picker) attaches every eligible file inside it,
-recursively. Binary files are skipped, and the per-turn budget still applies — 20 files and 256 KiB
-in total by default — so a large folder attaches what fits and reports how many files it left out.
-
-Files hidden by `.gitignore`, `.ignore`, `.pilotignore`, or the protected builtins (for example a
-`.env`, or anything under `node_modules`) are never read and are reported as skipped, so secrets
-can't be pulled into a prompt by mistake. This applies everywhere, including folder mentions and
-the completion picker.
-
-Every tool call that isn't read-only asks for approval before it runs, showing the exact diff
-or command. There are two answers: **allow once**, or **allow for this session**. Nothing Pilot
-grants outlives the session — there is no workspace-wide or machine-wide approval to hand out from
-a prompt you are trying to get past.
-
-A session approval of a *tool* covers that tool by name: approving `write_file` stops the prompting
-for later writes, including to files it has not touched yet, and reaches nothing else — not `edit`,
-not `apply_patch`, not a command. Writes stay inside the workspace boundary either way. A session
-approval of a *command* stays bound to the command that was shown, because `run_command` carries
-its whole command line, so one approved `npm test` must not stand in for whatever runs next.
-Destructive actions are refused by a built-in rule that no approval can reach past.
-
-In plain mode the same answers are `allow once` / `allow session` and `deny`.
+Any OpenAI-compatible endpoint works too: point `--base-url` at it, or set
+`PILOT_OPENAI_COMPATIBLE_MODELS_JSON` to a JSON array of
+`{ provider, modelId, displayName, capabilities }` entries for a whole fleet at once. Credentials
+there are environment-variable references, never raw keys.
 
 ## Configuration
 
-Pilot loads JSONC configuration from `~/.pilot/config.jsonc` (or `PILOT_CONFIG`), then
-`<workspace>/.pilot/config.jsonc`. Inspect the effective merged configuration and its source
-with `pilot config --json`.
+Pilot reads JSONC from `~/.pilot/config.jsonc` (or `PILOT_CONFIG`), then `.pilot/config.jsonc` in
+your workspace, with the workspace file layered on top. `pilot config --json` shows the result and
+the origin of every value.
 
 ```jsonc
 {
   "schemaVersion": 1,
   "model": { "default": "ollama/glm-5.2:cloud" },
   "context": { "maxInputTokens": 120000, "reservedOutputTokens": 4096 },
-  "prompt": { "systemPrompt": "builtin" },
   "runBudget": { "maxElapsedMs": 1800000 },
 }
 ```
 
-To enable `web_search`, configure Tavily in the trusted global config only. Pilot resolves
-the API key at runtime and does not place it in the effective configuration, tool arguments, or
-tool results:
+### Project instructions
 
-```jsonc
-{
-  "webSearch": {
-    "provider": "tavily",
-    "apiKey": { "variable": "TAVILY_API_KEY" },
-  },
-}
+Drop an `AGENTS.md` in your repository and Pilot reads it — from the workspace root down to the
+directory of each file it touches, so a subdirectory can add its own rules. `~/.pilot/AGENTS.md`
+holds instructions that follow you across every project. `pilot instructions` shows what applies.
+
+Pilot also sends a short baseline prompt of its own ahead of yours, mainly so smaller models behave
+predictably. Set `"prompt": { "systemPrompt": "none" }` to send nothing but your own instructions.
+
+### Skills and prompt templates
+
+A **skill** is a Markdown file of instructions for one kind of work that you switch on when you
+want it. Put skills in `.pilot/skills` in a repository, or `~/.pilot/skills` for your own. A skill
+is either `NAME.md` or `NAME/SKILL.md`, and the declared `name` has to match:
+
+```markdown
+---
+name: review-diff
+description: Review a working diff before it is committed
+requiresTools: [grep, read_file]
+deniesTools: run_command
+confirmsRisks: [workspace-write]
+---
+
+Read the whole diff before commenting. Report findings most severe first.
 ```
 
-`web_search` is omitted from the model's tool list when this section is absent. Repository and
-session configuration cannot select web-search credentials.
+Skills are discovered automatically but **never activate on their own**. `pilot skills` lists what
+was found and what it restricts, `pilot skills show NAME` prints one in full, and nothing reaches
+the model until you run `/skill NAME` (`/skill off NAME` to undo).
+
+The three permission fields only make a session *stricter*: `requiresTools` refuses activation if a
+tool is missing, `deniesTools` denies those tools for the rest of the session, and `confirmsRisks`
+forces confirmation for a risk class. No field grants anything, and a skill that came with a
+repository is labelled untrusted in context, the same as an `AGENTS.md`. Your own skill wins a name
+clash with a project one. `"skills": { "enabled": false }` turns discovery off entirely.
+
+A **prompt template** is a reusable prompt with placeholders, kept in `.pilot/prompts` (or
+`~/.pilot/prompts`):
+
+```markdown
+---
+name: fix-test
+description: Investigate and fix a failing test
+parameters: [testPath, note]
+argumentHint: <test path> <what you saw>
+---
+
+Run {{testPath}} and fix what it reports. What I saw: {{note}}
+```
+
+`/prompt fix-test test/foo.test.ts fails only on CI` sends the expanded text as your message.
+Arguments fill positionally and the last one absorbs the rest of the line; `{{arguments}}` gives
+you the whole string. List templates with `pilot prompts` or `/prompts`.
 
 ### Command environment
 
-`run_command` starts every command from a small environment — `PATH`, `PATHEXT`, `SystemRoot`,
-`COMSPEC`, `TEMP`, `TMP` — and lets the model set only `CI` and `NO_COLOR` on an individual
-command. Toolchains that need more (a pinned runtime, a corporate proxy, a locale) name the extra
-variables under `commands`:
+Commands start from a deliberately small environment — `PATH`, `PATHEXT`, `SystemRoot`, `COMSPEC`,
+`TEMP`, `TMP` — and the model may set only `CI` and `NO_COLOR` on an individual command. When your
+toolchain needs more (a pinned runtime, a corporate proxy, a locale, a fixture database), name the
+extra variables:
 
 ```jsonc
 {
@@ -195,30 +186,34 @@ variables under `commands`:
 }
 ```
 
-Both lists **extend** the defaults rather than replace them, so no configuration can strip `PATH`
-out from under a command. Configuration names variables and never holds their values: an inherited
-value is read from Pilot's own environment at run time, and one whose name looks like a credential
-is redacted from command output. `inheritEnvironment` is accepted from the trusted global config
-only — a repository config arrives with the clone, and widening what every subprocess inherits is
-not a decision a cloned file gets to make. `allowEnvironmentOverrides` carries no host value with
-it and stays available to repository config.
+Both lists **extend** the defaults rather than replace them, so nothing can strip `PATH` out from
+under a command. You name variables, never their values: the value is read from Pilot's own
+environment when the command runs, and one whose name looks like a credential is redacted from the
+output. `inheritEnvironment` is taken from your global config only — what every subprocess inherits
+isn't a decision a config that arrived with a clone gets to make — while
+`allowEnvironmentOverrides` carries no value of yours with it and may be set per repository.
 
-### System prompt
+### Web search
 
-Pilot sends a small, provider-neutral set of baseline instructions ahead of your own
-`AGENTS.md` files: which tool to reach for, the read-then-edit hash handshake that `edit` and
-`apply_patch` require, how to read a failed tool result, and the rule that file and web content
-is data rather than instructions. It exists mainly so smaller models behave predictably; larger
-ones mostly infer it. Set `"prompt": { "systemPrompt": "none" }` to send nothing but your own
-instructions.
+Add a Tavily key to your **global** config to give the model a `web_search` tool. Pilot resolves
+the key at runtime and never places it in the effective configuration, tool arguments, or results —
+which is why it takes the name of an environment variable rather than the key itself:
+
+```jsonc
+{
+  "webSearch": {
+    "provider": "tavily",
+    "apiKey": { "variable": "TAVILY_API_KEY" },
+  },
+}
+```
+
+Without this section the tool isn't offered at all. A repository config can't select the credential.
 
 ### Run budget
 
-Each turn runs an agent loop (call the model, run tools, feed results back, repeat) bounded by a
-run budget. Wall-clock **elapsed time** is the primary limit; the cycle, model-attempt, and
-tool-call counts are generous backstops against runaway iteration, not the normal stopping point.
-Per-request context size is bounded separately by `context.maxInputTokens`, so no cumulative token
-cap is applied unless you opt into one. Every field is tunable under `runBudget` in `config.jsonc`:
+Each turn is bounded, with wall-clock time as the real limit and the counts as backstops against
+runaway iteration. When a limit is hit the turn ends cleanly with a reason rather than erroring.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
@@ -228,53 +223,34 @@ cap is applied unless you opt into one. Every field is tunable under `runBudget`
 | `maxToolCalls` | `2000` | Tool calls per turn |
 | `maxInputTokens` | _unset_ | Optional cumulative input-token ceiling |
 | `maxOutputTokens` | _unset_ | Optional cumulative output-token ceiling |
-| `maxEstimatedCostUsd` | _unset_ | Optional estimated-cost ceiling (requires provider cost data) |
+| `maxEstimatedCostUsd` | _unset_ | Optional cost ceiling (needs provider cost data) |
 
-When a limit is reached the turn ends cleanly with an exhaustion reason rather than erroring. Raise
-`maxElapsedMs` for long autonomous tasks, or set `maxEstimatedCostUsd` to cap spend.
+Raise `maxElapsedMs` for long autonomous tasks; set `maxEstimatedCostUsd` to cap spend.
 
-Project-level `AGENTS.md` files (discovered from the workspace root down to each requested
-file's directory) provide project instructions; a trusted `~/.pilot/AGENTS.md` provides global
-ones. Inspect what applies with `pilot instructions`.
+### Type errors after every edit
 
-### Skills and prompt templates
-
-A skill is a Markdown file of instructions for one kind of work, kept in `.pilot/skills` (or your own
-`~/.pilot/skills`). Pilot discovers and validates them on its own but **never activates one by
-itself**: `pilot skills` lists what was found, where it came from, and what it restricts, and `/skill
-NAME` in chat switches it on for the session. A skill's manifest can require tools, deny tools, and
-force confirmation for a risk class — it has no way to grant a permission. Prompt templates
-(`.pilot/prompts`) are reusable prompts with placeholders that `/prompt NAME arguments` expands into
-a single turn. See the [user guide](./docs/user-guide.md#skills-and-prompt-templates).
-
-## Development
+If a language server is available, Pilot checks each file it just wrote and hands the errors back
+to the model in the same turn, so a broken edit gets fixed immediately instead of at the next test
+run. TypeScript 7 projects need nothing — Pilot uses the compiler the project already depends on.
+Otherwise:
 
 ```sh
-pnpm install
-pnpm check     # format, lint, typecheck
-pnpm test      # unit + integration tests
-pnpm eval      # deterministic evaluation gate
-pnpm build
+npm install -g typescript-language-server typescript   # TypeScript 5.x / 6.x
+npm install -g pyright                                 # Python
 ```
 
-## Releasing
+`pilot doctor` reports what's missing. Turn it off with `"diagnostics": { "enabled": false }`.
 
-Packages are versioned in lockstep, with each package's `package.json` as the single source of
-truth. `pnpm release:version` writes one version across all of them, and `pnpm check` fails if they
-ever disagree. To cut a release:
+## Where your data lives
 
-```sh
-pnpm release:version 0.2.0   # writes the version into every publishable package.json
-git commit -am "release: v0.2.0"
-git tag pilot-v0.2.0
-git push --follow-tags
-```
+Sessions and tool activity are stored in SQLite under `~/.pilot` (override with `PILOT_DATA_DIR`),
+alongside `config.jsonc`, `models.json`, and your personal `skills`, `prompts`, and `AGENTS.md`.
+Nothing leaves your machine except what you send to the model you configured.
 
-Then publish a GitHub Release from that tag (via the GitHub UI, or `gh release create pilot-v0.2.0
---generate-notes`). Publishing the release triggers `.github/workflows/release.yml`, which verifies
-the tag matches the package version, re-runs the full check/test/build gate, and then publishes all
-`@pilotrun/*` packages to npm. The workflow can also be run manually via `workflow_dispatch` for a
-retry, in which case it publishes whatever version is currently in `apps/cli/package.json`.
+## Contributing
+
+Building from source, the test suites, and the release process are in
+[CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
 
