@@ -25,6 +25,8 @@ export function resolveConfiguration(
   const provenance: Record<string, ConfigurationProvenance> = {};
   const permissionRules: PermissionRule[] = [];
   const permissionRuleIds = new Set<string>();
+  const inheritEnvironment = new Set<string>();
+  const allowEnvironmentOverrides = new Set<string>();
   for (const [layerIndex, layer] of ordered.entries()) {
     const result = ConfigurationLayerValueSchema.safeParse(layer.value);
     if (!result.success) {
@@ -50,6 +52,12 @@ export function resolveConfiguration(
         layerIndex,
       });
     }
+    for (const name of result.data.commands?.inheritEnvironment ?? []) {
+      inheritEnvironment.add(name);
+    }
+    for (const name of result.data.commands?.allowEnvironmentOverrides ?? []) {
+      allowEnvironmentOverrides.add(name);
+    }
     merged = deepMerge(merged, result.data);
     recordProvenance(
       result.data,
@@ -62,7 +70,16 @@ export function resolveConfiguration(
       provenance,
     );
   }
-  merged = deepMerge(merged, { permissions: { rules: permissionRules } });
+  // Arrays are replaced by the merge, so the lists that must accumulate across layers are
+  // rebuilt from every layer here: permission rules in precedence order, and the two command
+  // environment lists as a union of the built-in defaults and whatever each layer added.
+  merged = deepMerge(merged, {
+    permissions: { rules: permissionRules },
+    commands: {
+      inheritEnvironment: [...inheritEnvironment],
+      allowEnvironmentOverrides: [...allowEnvironmentOverrides],
+    },
+  });
   const final = PilotConfigurationSchema.safeParse(merged);
   if (!final.success) {
     throw new ConfigurationError(
@@ -88,6 +105,19 @@ function validateLayerAuthority(layer: ConfigurationLayer, value: ConfigurationL
     throw new ConfigurationError(
       `${layer.source} configuration cannot select a web-search credential`,
       { source: layer.source, location: layer.location, path: "webSearch" },
+    );
+  }
+  // A repository config arrives with the clone. Letting it name variables to inherit would let a
+  // checked-in file pull host environment into every subprocess Pilot runs, so widening the
+  // inherited set stays with the layers the user controls. Naming a variable the model may set on
+  // one command carries no host value with it and stays available to a project.
+  if (
+    (layer.source === "project" || layer.source === "session") &&
+    value.commands?.inheritEnvironment !== undefined
+  ) {
+    throw new ConfigurationError(
+      `${layer.source} configuration cannot widen the inherited command environment`,
+      { source: layer.source, location: layer.location, path: "commands.inheritEnvironment" },
     );
   }
   for (const rule of value.permissions?.rules ?? []) {

@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import {
   CancellationError,
+  defaultAllowedEnvironmentOverrides,
+  defaultInheritedEnvironmentNames,
   defineTool,
   PilotError,
   type ToolDefinition,
@@ -93,7 +95,8 @@ export const RunCommandInputSchema = z
       .default({})
       .readonly()
       .describe(
-        "Extra environment variables. Only CI and NO_COLOR may be set; anything else is refused.",
+        "Extra environment variables. Only the names listed in this tool's description may be " +
+          "set; anything else is refused.",
       ),
     timeoutMs: z
       .number()
@@ -326,11 +329,19 @@ export function createRunCommandTool(
 ): ToolDefinition<typeof RunCommandInputSchema, typeof RunCommandOutputSchema> {
   const executor = options.executor ?? new NodeCommandExecutor();
   const shell = options.shell ?? defaultShellConfiguration(options.environment);
-  const allowedOverrides = new Set(options.allowedEnvironmentOverrides ?? ["CI", "NO_COLOR"]);
+  const allowedOverrides = new Set(
+    options.allowedEnvironmentOverrides ?? defaultAllowedEnvironmentOverrides,
+  );
   const baseEnvironment = selectEnvironment(
     options.environment ?? {},
     options.inheritedEnvironmentNames ?? defaultInheritedEnvironmentNames,
   );
+  // Configuration can name any variable to inherit, including one holding a credential, so an
+  // inherited value with a secret-shaped name is redacted from command output exactly as a
+  // model-supplied one already is.
+  const inheritedSecrets = Object.entries(baseEnvironment)
+    .filter(([name]) => secretShapedName.test(name))
+    .map(([, value]) => value);
   const configuredSecrets = options.configuredSecrets ?? [];
   return defineTool({
     name: "run_command",
@@ -347,7 +358,10 @@ export function createRunCommandTool(
       "and do not require approval.\n\n" +
       "A non-zero exit code is returned as a normal result, not an error: inspect stdout, stderr, " +
       "and exitCode, then revise the command. Every command runs inside the workspace and asks " +
-      "for approval before it runs.",
+      "for approval before it runs.\n\n" +
+      (allowedOverrides.size === 0
+        ? "The environment argument is refused: no variable may be set on a command."
+        : `Only these environment variables may be set on a command: ${[...allowedOverrides].join(", ")}.`),
     inputSchema: RunCommandInputSchema,
     outputSchema: RunCommandOutputSchema,
     metadata: {
@@ -377,7 +391,7 @@ export function createRunCommandTool(
           throw new CommandExecutionError(
             "PILOT_COMMAND_ENVIRONMENT_DENIED",
             `Environment variable ${name} is not allowed`,
-            { variable: name },
+            { variable: name, allowed: [...allowedOverrides] },
           );
         }
         environment[name] = value;
@@ -387,8 +401,9 @@ export function createRunCommandTool(
       const secrets = Object.freeze(
         [
           ...configuredSecrets,
+          ...inheritedSecrets,
           ...Object.entries(input.environment)
-            .filter(([name]) => /(?:api[_-]?key|credential|password|secret|token)/iu.test(name))
+            .filter(([name]) => secretShapedName.test(name))
             .map(([, value]) => value),
         ].filter((value) => value.length >= 4),
       );
@@ -489,14 +504,7 @@ function defaultShellConfiguration(
     : { executable: "/bin/sh", argsPrefix: ["-c"] };
 }
 
-const defaultInheritedEnvironmentNames = Object.freeze([
-  "PATH",
-  "PATHEXT",
-  "SystemRoot",
-  "COMSPEC",
-  "TEMP",
-  "TMP",
-]);
+const secretShapedName = /(?:api[_-]?key|credential|password|secret|token)/iu;
 
 function selectEnvironment(
   source: Readonly<Record<string, string | undefined>>,

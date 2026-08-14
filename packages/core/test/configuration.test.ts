@@ -183,6 +183,71 @@ describe("configuration resolution", () => {
     ).toThrowError(ConfigurationError);
   });
 
+  it("accumulates command environment names over the built-in defaults", () => {
+    const effective = resolveConfiguration([
+      {
+        source: "global",
+        location: "/home/config.jsonc",
+        value: {
+          commands: {
+            inheritEnvironment: ["JAVA_HOME", "HTTPS_PROXY", "PATH"],
+            allowEnvironmentOverrides: ["CI", "LANG"],
+          },
+        },
+      },
+      {
+        source: "project",
+        location: "/repo/.pilot/config.jsonc",
+        value: { commands: { allowEnvironmentOverrides: ["TEST_DATABASE_URL"] } },
+      },
+    ]);
+
+    expect(effective.configuration.commands).toEqual({
+      inheritEnvironment: [
+        ...builtinConfiguration.commands.inheritEnvironment,
+        "JAVA_HOME",
+        "HTTPS_PROXY",
+      ],
+      allowEnvironmentOverrides: [
+        ...builtinConfiguration.commands.allowEnvironmentOverrides,
+        "LANG",
+        "TEST_DATABASE_URL",
+      ],
+    });
+    expect(effective.provenance["commands.inheritEnvironment"]).toMatchObject({
+      source: "global",
+      location: "/home/config.jsonc",
+    });
+  });
+
+  it("defaults command environment names to the built-in lists", () => {
+    expect(resolveConfiguration([]).configuration.commands).toEqual({
+      inheritEnvironment: ["PATH", "PATHEXT", "SystemRoot", "COMSPEC", "TEMP", "TMP"],
+      allowEnvironmentOverrides: ["CI", "NO_COLOR"],
+    });
+  });
+
+  it("refuses repository-widened command inheritance and malformed variable names", () => {
+    expect(() =>
+      resolveConfiguration([
+        {
+          source: "project",
+          location: "project",
+          value: { commands: { inheritEnvironment: ["AWS_SECRET_ACCESS_KEY"] } },
+        },
+      ]),
+    ).toThrowError(ConfigurationError);
+    expect(() =>
+      resolveConfiguration([
+        {
+          source: "global",
+          location: "global",
+          value: { commands: { allowEnvironmentOverrides: ["NOT A NAME"] } },
+        },
+      ]),
+    ).toThrowError(ConfigurationError);
+  });
+
   it("validates cross-field constraints after merging all layers", () => {
     expect(() =>
       resolveConfiguration([
