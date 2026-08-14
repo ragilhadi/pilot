@@ -12,6 +12,20 @@ export const EnvironmentReferenceSchema = z
   .readonly();
 
 const secretAlias = z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u);
+// Environment variable names, not values: configuration names a variable and the value is read
+// from Pilot's own environment, so a checked-in config never becomes a place secrets land. Mixed
+// case is accepted because the built-in inherited set already includes `SystemRoot` and `COMSPEC`.
+const environmentVariableName = z
+  .string()
+  .max(256)
+  .regex(/^[A-Za-z_][A-Za-z0-9_]*$/u);
+const commandsLayerSchema = z
+  .object({
+    inheritEnvironment: z.array(environmentVariableName).max(256).readonly().optional(),
+    allowEnvironmentOverrides: z.array(environmentVariableName).max(256).readonly().optional(),
+  })
+  .strict()
+  .readonly();
 const modelLayerSchema = z
   .object({
     default: ModelKeySchema.optional(),
@@ -94,6 +108,7 @@ export const ConfigurationLayerValueSchema = z
     prompt: promptLayerSchema.optional(),
     skills: skillsLayerSchema.optional(),
     permissions: permissionsLayerSchema.optional(),
+    commands: commandsLayerSchema.optional(),
     runBudget: runBudgetLayerSchema.optional(),
     webSearch: webSearchSchema.optional(),
     secrets: z.record(secretAlias, EnvironmentReferenceSchema).optional(),
@@ -177,6 +192,16 @@ export const PilotConfigurationSchema = z
       .readonly(),
     permissions: z
       .object({ rules: z.array(PermissionRuleSchema).max(1_000).readonly() })
+      .strict()
+      .readonly(),
+    commands: z
+      .object({
+        // Names inherited from Pilot's environment into every command it runs, and names the
+        // model may set on a single command. Both lists accumulate across layers rather than
+        // being replaced, so configuration can only widen what the built-in defaults allow.
+        inheritEnvironment: z.array(environmentVariableName).max(1_024).readonly(),
+        allowEnvironmentOverrides: z.array(environmentVariableName).max(1_024).readonly(),
+      })
       .strict()
       .readonly(),
     runBudget: z

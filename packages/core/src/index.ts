@@ -22,6 +22,8 @@ export {
   type ConfigurationLayerValue,
   ConfigurationLayerValueSchema,
   type ConfigurationProvenance,
+  defaultAllowedEnvironmentOverrides,
+  defaultInheritedEnvironmentNames,
   type EffectiveConfiguration,
   type EnvironmentReference,
   EnvironmentReferenceSchema,

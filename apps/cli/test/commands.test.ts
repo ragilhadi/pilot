@@ -801,6 +801,74 @@ describe("pilot chat", () => {
     }
   }, 20_000);
 
+  it("runs a command with the environment names configured under commands", async () => {
+    const workspacePath = await mkdtemp(path.join(tmpdir(), "pilot-cli-command-env-test-"));
+    try {
+      const toolInput = {
+        command: {
+          mode: "direct",
+          executable: process.execPath,
+          args: [
+            "-e",
+            "process.stdout.write(process.env.PILOT_TEST_TOOLCHAIN + '|' + process.env.TEST_DATABASE_URL + '\\n')",
+          ],
+        },
+        cwd: ".",
+        environment: { TEST_DATABASE_URL: "postgres://fixture" },
+      };
+      const model = new FakeLanguageModel({
+        providerId: "fake",
+        modelId: "command-environment",
+        scripts: [
+          toolCallScript({
+            responseId: "response-command",
+            callId: "call-command",
+            toolName: "run_command",
+            argumentDeltas: [JSON.stringify(toolInput)],
+            completedInput: toolInput,
+          }),
+          textResponseScript({ responseId: "response-final", deltas: ["Command completed"] }),
+        ],
+      });
+      const { dependencies, stdout, stderr } = cliDependencies(
+        new ModelRegistry([{ model, displayName: "Command Environment Fake" }]),
+        new AbortController().signal,
+        undefined,
+        workspacePath,
+      );
+
+      expect(
+        await runCli(["chat", "--model", "fake/command-environment"], {
+          ...dependencies,
+          environment: { ...process.env, PILOT_TEST_TOOLCHAIN: "configured-toolchain" },
+          configuration: resolveConfiguration([
+            {
+              source: "global",
+              location: "test",
+              value: {
+                commands: {
+                  inheritEnvironment: ["PILOT_TEST_TOOLCHAIN"],
+                  allowEnvironmentOverrides: ["TEST_DATABASE_URL"],
+                },
+              },
+            },
+          ]),
+          stdin: approvalAwareLines({
+            initialLine: "Run the command",
+            approvalCount: 1,
+            output: stdout,
+            remainingScripts: () => model.remainingScripts,
+          }),
+        }),
+      ).toBe(0);
+
+      expect(stdout.text()).toContain("configured-toolchain|postgres://fixture\n");
+      expect(stderr.text()).toBe("");
+    } finally {
+      await rm(workspacePath, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  }, 20_000);
+
   it("exposes the bounded repository tools and completes a real read_file cycle", async () => {
     const workspacePath = await mkdtemp(path.join(tmpdir(), "pilot-cli-tools-test-"));
     try {

@@ -179,6 +179,30 @@ tool results:
 `web_search` is omitted from the model's tool list when this section is absent. Repository and
 session configuration cannot select web-search credentials.
 
+### Command environment
+
+`run_command` starts every command from a small environment — `PATH`, `PATHEXT`, `SystemRoot`,
+`COMSPEC`, `TEMP`, `TMP` — and lets the model set only `CI` and `NO_COLOR` on an individual
+command. Toolchains that need more (a pinned runtime, a corporate proxy, a locale) name the extra
+variables under `commands`:
+
+```jsonc
+{
+  "commands": {
+    "inheritEnvironment": ["JAVA_HOME", "HTTPS_PROXY", "NODE_EXTRA_CA_CERTS"],
+    "allowEnvironmentOverrides": ["TEST_DATABASE_URL"],
+  },
+}
+```
+
+Both lists **extend** the defaults rather than replace them, so no configuration can strip `PATH`
+out from under a command. Configuration names variables and never holds their values: an inherited
+value is read from Pilot's own environment at run time, and one whose name looks like a credential
+is redacted from command output. `inheritEnvironment` is accepted from the trusted global config
+only — a repository config arrives with the clone, and widening what every subprocess inherits is
+not a decision a cloned file gets to make. `allowEnvironmentOverrides` carries no host value with
+it and stays available to repository config.
+
 ### System prompt
 
 Pilot sends a small, provider-neutral set of baseline instructions ahead of your own

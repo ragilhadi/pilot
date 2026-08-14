@@ -1345,6 +1345,8 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
   const todoStore = new InMemoryTodoStore();
   const todoTools = createTodoTools(todoStore);
   const environment = dependencies.environment ?? process.env;
+  const commandsConfiguration =
+    dependencies.configuration?.configuration.commands ?? builtinConfiguration.commands;
   const webSearchConfiguration = dependencies.configuration?.configuration.webSearch;
   const webSearchTool =
     webSearchConfiguration === undefined
@@ -1400,6 +1402,10 @@ async function executeChat(command: ChatCommand, dependencies: CliDependencies):
       ...(webSearchTool === undefined ? [] : [webSearchTool]),
       createRunCommandTool(boundary, {
         environment,
+        // The resolved lists already include the built-in defaults: `commands` in config.jsonc
+        // widens what a command inherits and what the model may set, never narrows it.
+        inheritedEnvironmentNames: commandsConfiguration.inheritEnvironment,
+        allowedEnvironmentOverrides: commandsConfiguration.allowEnvironmentOverrides,
         onOutput: (event, context) => {
           emit({
             type: "command.output",
