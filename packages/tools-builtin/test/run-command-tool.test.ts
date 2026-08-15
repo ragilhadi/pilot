@@ -123,6 +123,30 @@ describe("run_command tool contract", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("names the configured environment overrides in its description and its denial", async () => {
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const execute = vi.fn<CommandExecutor["execute"]>();
+    const tool = createRunCommandTool(boundary, {
+      executor: { execute },
+      allowedEnvironmentOverrides: ["CI", "NO_COLOR", "TEST_DATABASE_URL"],
+    });
+
+    expect(tool.description).toContain(
+      "Only these environment variables may be set on a command: CI, NO_COLOR, TEST_DATABASE_URL.",
+    );
+    await expect(
+      tool.execute(
+        RunCommandInputSchema.parse({
+          command: { mode: "direct", executable: "echo", args: ["hello"] },
+          environment: { LANG: "C" },
+        }),
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      metadata: { variable: "LANG", allowed: ["CI", "NO_COLOR", "TEST_DATABASE_URL"] },
+    });
+  });
+
   it.each([
     ["a plain string", "npm run test | tail -20"],
     ["a shell object without mode", { command: "npm run test | tail -20" }],
@@ -198,6 +222,28 @@ describe("Node command execution", () => {
       stdoutTruncated: true,
       classification: { risk: "unknown" },
     });
+  });
+
+  it("redacts an inherited secret-shaped value from command output", async () => {
+    const boundary = await NodeWorkspaceBoundary.create(workspacePath);
+    const secret = "inherited-registry-token";
+    const tool = createRunCommandTool(boundary, {
+      environment: { ...process.env, NPM_TOKEN: secret },
+      inheritedEnvironmentNames: ["PATH", "PATHEXT", "SystemRoot", "COMSPEC", "NPM_TOKEN"],
+    });
+
+    const result = await tool.execute(
+      RunCommandInputSchema.parse({
+        command: {
+          mode: "direct",
+          executable: process.execPath,
+          args: ["-e", "process.stdout.write('token=' + process.env.NPM_TOKEN)"],
+        },
+      }),
+      context(),
+    );
+
+    expect(result.output.stdout).toBe("token=***");
   });
 
   it("terminates a timed-out process tree and reports timeout state", async () => {

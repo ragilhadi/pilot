@@ -4,8 +4,6 @@ Language-server diagnostics for the Pilot coding agent. Implements `WorkspaceDia
 `@pilotrun/core`, so the edit tools can report "your change does not compile" without depending on a
 package that spawns subprocesses.
 
-See [ADR 0009](../../docs/decisions/0009-language-server-diagnostics.md) for the reasoning.
-
 ## What it does
 
 After every successful `edit`, `write_file`, or `apply_patch`, Pilot asks the language server about
