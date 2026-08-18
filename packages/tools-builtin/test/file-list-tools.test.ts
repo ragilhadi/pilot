@@ -194,6 +194,25 @@ describe("glob", () => {
     },
   );
 
+  it.each([
+    ["**/{*.ts,*.tsx}", ["src/a.ts", "src/b.ts", "src/nested/component.tsx"]],
+    ["{src/a*.ts,src/b.ts}", ["src/a.ts", "src/b.ts"]],
+  ])(
+    "compiles brace patterns with wildcards: %s",
+    (pattern, expected) => {
+      const matcher = compileGlobPattern(pattern);
+      expected.forEach((p) => expect(matcher.test(p)).toBe(true));
+    },
+  );
+
+  it("throws GlobPatternError (not SyntaxError) for reversed character-class ranges", () => {
+    expect(() => compileGlobPattern("[z-a].ts")).toThrow(GlobPatternError);
+  });
+
+  it("throws GlobPatternError for unbalanced brace alternatives", () => {
+    expect(() => compileGlobPattern("{*.ts")).toThrow(GlobPatternError);
+  });
+
   it("compiles patterns containing a literal hyphen without a RegExp escape error", () => {
     const matcher = compileGlobPattern("packages/tools-builtin/*.ts");
     expect(matcher.test("packages/tools-builtin/index.ts")).toBe(true);
