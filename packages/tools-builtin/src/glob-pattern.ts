@@ -14,7 +14,16 @@ export class GlobPatternError extends PilotError {
 
 export function compileGlobPattern(pattern: string): RegExp {
   validatePattern(pattern);
-  return new RegExp(`^${compileFragment(pattern.replaceAll("\\", "/"))}$`, "u");
+  let source: string;
+  try {
+    source = `^${compileFragment(pattern.replaceAll("\\", "/"))}$`;
+    return new RegExp(source, "u");
+  } catch (e) {
+    if (e instanceof SyntaxError && e.name === "SyntaxError") {
+      throw new GlobPatternError(`Failed to compile glob pattern: ${e.message}`, pattern);
+    }
+    throw e;
+  }
 }
 
 function validatePattern(pattern: string): void {
@@ -67,7 +76,7 @@ function compileFragment(pattern: string): string {
           pattern,
         );
       }
-      output += `(?:${alternatives.map(escapeRegex).join("|")})`;
+      output += `(?:${alternatives.map(compileFragment).join("|")})`;
       index = closing;
     } else {
       output += escapeRegex(character ?? "");
