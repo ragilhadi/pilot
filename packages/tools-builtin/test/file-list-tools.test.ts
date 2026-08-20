@@ -200,6 +200,22 @@ describe("glob", () => {
     expect(matcher.test("packages/tools_builtin/index.ts")).toBe(false);
   });
 
+  it.each([
+    ["**/{*.ts,*.tsx}", ["src/a.ts", "src/b.ts", "src/nested/component.tsx"]],
+    ["{a*,b}", ["a.ts", "ab.ts", "b.ts", "bb.ts"]],
+  ])(
+    "handles glob metacharacters inside braces correctly: %s",
+    (pattern, expected) => {
+      const matcher = compileGlobPattern(pattern);
+      expect(expected.every((s) => matcher.test(s))).toBe(true);
+    },
+  );
+
+  it("throws GlobPatternError (not SyntaxError) when brace alternatives produce invalid regex", () => {
+    // [z-a] has a reversed character-class range, which is invalid regex
+    expect(() => compileGlobPattern("[z-a]")).toThrow(GlobPatternError);
+  });
+
   it("publishes strict read-only model schemas through the tool registry", async () => {
     const boundary = await NodeWorkspaceBoundary.create(workspacePath);
     const tools = createBuiltinFileListTools(boundary);

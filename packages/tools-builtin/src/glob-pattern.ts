@@ -14,7 +14,15 @@ export class GlobPatternError extends PilotError {
 
 export function compileGlobPattern(pattern: string): RegExp {
   validatePattern(pattern);
-  return new RegExp(`^${compileFragment(pattern.replaceAll("\\", "/"))}$`, "u");
+  const compiled = compileFragment(pattern.replaceAll("\\", "/"));
+  try {
+    return new RegExp(`^${compiled}$`, "u");
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new GlobPatternError("Glob pattern compiled to an invalid regular expression", pattern);
+    }
+    throw error;
+  }
 }
 
 function validatePattern(pattern: string): void {
@@ -67,7 +75,10 @@ function compileFragment(pattern: string): string {
           pattern,
         );
       }
-      output += `(?:${alternatives.map(escapeRegex).join("|")})`;
+      // Recurse each alternative through compileFragment so glob metacharacters
+      // (* ? [...]) inside braces are handled correctly, not escaped literally.
+      const compiledAlternatives = alternatives.map((alt) => compileFragment(alt));
+      output += `(?:${compiledAlternatives.join("|")})`;
       index = closing;
     } else {
       output += escapeRegex(character ?? "");
